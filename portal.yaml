@@ -1,0 +1,52 @@
+# Shared by robot, human operator, policies, and recorder.
+version: 1
+
+fps: 30 # observation rate
+
+reuse_stale_frames: true
+
+# State and actions are lossy (Portal's default): a lost packet is skipped
+# instead of holding up newer ones.
+
+# Three views, the ones Dream-1 reads: one over the workspace and one on each
+# wrist. Left and right are as the robot sees them (standing behind the arms,
+# facing the workspace).
+videos:
+  - { name: overhead_camera, codec: h264, max_bitrate_kbps: 20000, screencast: true }
+  - { name: left_wrist_camera, codec: h264, max_bitrate_kbps: 20000, screencast: true }
+  - { name: right_wrist_camera, codec: h264, max_bitrate_kbps: 20000, screencast: true }
+
+# The MakerMods Metal SDK's own units: joint1..joint6 in radians (the URDF's
+# frame, which Dream's `metal` IK also reads), the gripper as its stroke in mm,
+# 0 closed to 80 open.
+state:
+  - { name: left_joint1.pos, dtype: f32 }
+  - { name: left_joint2.pos, dtype: f32 }
+  - { name: left_joint3.pos, dtype: f32 }
+  - { name: left_joint4.pos, dtype: f32 }
+  - { name: left_joint5.pos, dtype: f32 }
+  - { name: left_joint6.pos, dtype: f32 }
+  - { name: left_gripper.pos, dtype: f32 }
+  - { name: right_joint1.pos, dtype: f32 }
+  - { name: right_joint2.pos, dtype: f32 }
+  - { name: right_joint3.pos, dtype: f32 }
+  - { name: right_joint4.pos, dtype: f32 }
+  - { name: right_joint5.pos, dtype: f32 }
+  - { name: right_joint6.pos, dtype: f32 }
+  - { name: right_gripper.pos, dtype: f32 }
+
+action:
+  - { name: left_joint1.pos, dtype: f32 }
+  - { name: left_joint2.pos, dtype: f32 }
+  - { name: left_joint3.pos, dtype: f32 }
+  - { name: left_joint4.pos, dtype: f32 }
+  - { name: left_joint5.pos, dtype: f32 }
+  - { name: left_joint6.pos, dtype: f32 }
+  - { name: left_gripper.pos, dtype: f32 }
+  - { name: right_joint1.pos, dtype: f32 }
+  - { name: right_joint2.pos, dtype: f32 }
+  - { name: right_joint3.pos, dtype: f32 }
+  - { name: right_joint4.pos, dtype: f32 }
+  - { name: right_joint5.pos, dtype: f32 }
+  - { name: right_joint6.pos, dtype: f32 }
+  - { name: right_gripper.pos, dtype: f32 }

@@ -1,0 +1,215 @@
+"""Operator-side test: the parts the wire tests cannot reach.
+
+    uv run python -m test.test_teleop      (no LiveKit server, no hardware)
+
+`test_recorder` and `test_degraded` drive the operator through `FakeOperator`,
+which stands in for the tick loop. What they do not exercise is the logic
+around it: which frame the anchor names, what a digit key does to the task, and
+whether the keyboard taps deliver at all. Those are pure functions and one pty
+away from testable, so there is no excuse for leaving them to the rig.
+"""
+from __future__ import annotations
+
+import asyncio
+import os
+import pty
+import sys
+import termios
+import time
+from dataclasses import dataclass
+
+import numpy as np
+
+from teleoperator import Tally, View, cycle_active_operator, select_task
+from utils.rerun_view import Preview
+from test._harness import Checks
+
+
+@dataclass
+class Frame:
+    timestamp_us: int
+
+
+def check_view(c: Checks) -> None:
+    view = View(["left_wrist_camera", "overhead_camera"])
+    c.check(view.anchor() is None, "no anchor before any frame")
+    view.saw("left_wrist_camera", Frame(2_000))
+    c.check(view.anchor() is None, "no anchor while one camera is still blank")
+    view.saw("overhead_camera", Frame(1_000))
+    c.check(view.anchor() == 1_000,
+            "the anchor is the OLDEST of the newest per camera -- the instant "
+            "everything on screen was current", str(view.anchor()))
+    view.saw("overhead_camera", Frame(3_000))
+    c.check(view.anchor() == 2_000, "and advances as the laggard catches up",
+            str(view.anchor()))
+    c.check("fps in" in view.report(), "the 5s line renders", view.report())
+
+
+def check_task_switch(c: Checks) -> None:
+    tasks = ["Pick up the red cube", "Stack it on the blue", "Push the tray left"]
+    c.check(select_task(tasks, 0, "2", False) == 1, "a digit selects that task")
+    c.check(select_task(tasks, 1, "2", False) == 1, "re-selecting the active task is a no-op")
+    c.check(select_task(tasks, 1, "7", False) == 1, "a digit past the end of the list changes nothing")
+    c.check(select_task(tasks, 0, "3", True) == 0,
+            "switching is refused mid-take, so no span is labelled two things")
+
+
+def check_tally(c: Checks) -> None:
+    tally = Tally(["Pick", "Stack"])
+    c.check(tally.line(0) == "0 episodes of 'Pick'", "an empty tally reads naturally",
+            tally.line(0))
+    tally.record(0)
+    c.check(tally.line(0) == "1 episode of 'Pick'", "and singular at one", tally.line(0))
+    tally.record(0)
+    tally.record(1)
+    c.check(tally.counts == [2, 1], "counts are per task", str(tally.counts))
+
+
+def check_hotkeys(c: Checks) -> None:
+    """Over a pty, because the terminal tap is the one that works on Wayland
+    and over SSH -- the two places this rig actually runs."""
+    primary, secondary = pty.openpty()
+    saved, sys.stdin = sys.stdin, os.fdopen(secondary, "r")
+    before = termios.tcgetattr(secondary)
+    try:
+        from utils.hotkeys import Hotkeys
+
+        # Terminal tap only: the global tap reads the whole machine, so a key
+        # typed in another window would arrive here as a real event.
+        keys = Hotkeys(global_tap=False)
+        keys.start()
+        c.check(keys.terminal_active, "the terminal tap attaches to a tty")
+
+        # All at once: a buffered read would hand back one and strand the rest
+        # until the next keystroke.
+        os.write(primary, b"cr3[x")
+        time.sleep(0.5)
+        got = keys.drain()
+        c.check(got == ["c", "r", "3", "[", "x"], "every key arrives, in order, in one drain",
+                str(got))
+
+        os.write(primary, b"qz0")
+        time.sleep(0.3)
+        c.check(keys.drain() == [], "keys outside the set are ignored, 0 included")
+
+        os.write(primary, b"22")
+        time.sleep(0.4)
+        c.check(keys.drain() == ["2", "2"], "a real double-press from one tap survives")
+
+        keys._deliver("2", "terminal")
+        keys._deliver("2", "global")
+        c.check(keys.drain() == ["2"], "the same key from both taps counts once")
+
+        keys.stop()
+        time.sleep(0.2)
+        restored = termios.tcgetattr(secondary)
+        c.check(restored == before,
+                "the terminal is restored on stop -- cbreak left behind is a dead shell",
+                str([(i, a, b) for i, (a, b) in enumerate(zip(before, restored)) if a != b]))
+    finally:
+        sys.stdin = saved
+        os.close(primary)
+
+
+def answer(script: str) -> list[str]:
+    """Run `prompt_tasks` against a pty preloaded with `script`.
+
+    A real terminal, not a pipe: the prompt takes the default without asking
+    when stdin is not a tty, which is the branch that must NOT run here.
+    """
+    from utils.session import prompt_tasks
+
+    primary, secondary = pty.openpty()
+    saved, sys.stdin = sys.stdin, os.fdopen(secondary, "r")
+    try:
+        os.write(primary, script.encode())
+        return prompt_tasks()
+    finally:
+        sys.stdin = saved
+        os.close(primary)
+
+
+def check_session(c: Checks) -> None:
+    from utils.session import DEFAULT_TASK, MAX_TASKS
+
+    for key in ("PORTAL_DATA_TASKS", "PORTAL_DATA_TASK"):
+        os.environ.pop(key, None)
+
+    c.check(answer("\n\n") == [DEFAULT_TASK], "ENTER twice takes the default, one task")
+    c.check(answer("1\nPick up the cube\n") == ["Pick up the cube"], "one task, named")
+    c.check(answer("3\nPick\nStack\nPush\n") == ["Pick", "Stack", "Push"],
+            "three tasks come back in hotkey order")
+    c.check(answer("12\nPick\n" + "x\n" * MAX_TASKS)[:1] == ["Pick"]
+            and len(answer("12\nPick\n" + "x\n" * MAX_TASKS)) == MAX_TASKS,
+            f"a count above the ceiling clamps to {MAX_TASKS}, not a crash")
+    c.check(answer("banana\nPick\n") == ["Pick"], "a non-numeric count falls back to one")
+    # A blank second task would silently duplicate the first and mislabel every
+    # span collected under it, so it is re-asked rather than defaulted.
+    c.check(answer("2\nPick\n\n\nStack\n") == ["Pick", "Stack"],
+            "a blank task is re-asked, never accepted")
+
+    os.environ["PORTAL_DATA_TASKS"] = "Pick it up; Put it down ;; Push it, gently"
+    c.check(answer("") == ["Pick it up", "Put it down", "Push it, gently"],
+            "PORTAL_DATA_TASKS skips the questions entirely, and splits on ';' "
+            "so a task may contain a comma")
+    del os.environ["PORTAL_DATA_TASKS"]
+
+
+def check_preview(c: Checks) -> None:
+    preview = Preview("selftest", ["overhead_camera"])
+    preview.show("overhead_camera", np.zeros((48, 64, 3), np.uint8))
+    preview.show_task(["only one"], 0)
+    preview.show_task(["a", "b"], 1)
+    preview.close()
+    c.check(True, "Preview survives a missing viewer binary and stays usable")
+
+
+async def check_handoff(c: Checks) -> None:
+    class Gate:
+        current = None
+        peers = []
+        fail = False
+
+        def operators(self):
+            return self.peers
+
+        def active_operator(self):
+            return self.current
+
+        async def set_active_operator(self, target):
+            if self.fail:
+                raise RuntimeError("robot disconnected")
+            self.current = target
+
+    gate = Gate()
+    await cycle_active_operator(gate, "human")
+    c.check(gate.current == "human", "c claims human control from an empty gate")
+    await cycle_active_operator(gate, "human")
+    c.check(gate.current == "human", "solo teleop keeps human control")
+    gate.peers = ["policy-act"]
+    await cycle_active_operator(gate, "human")
+    c.check(gate.current == "policy-act", "c hands control to ACT")
+    await cycle_active_operator(gate, "human")
+    c.check(gate.current == "human", "c takes control back for a correction")
+    gate.current = "departed-policy"
+    await cycle_active_operator(gate, "human")
+    c.check(gate.current == "human", "a missing active peer returns the cycle to human")
+    gate.fail = True
+    await cycle_active_operator(gate, "human")
+    c.check(gate.current == "human", "failed RPC leaves control unchanged without ending teleop")
+
+
+def main() -> int:
+    c = Checks("teleoperator")
+    asyncio.run(check_handoff(c))
+    check_view(c)
+    check_task_switch(c)
+    check_session(c)
+    check_tally(c)
+    check_hotkeys(c)
+    check_preview(c)
+    return c.exit_code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

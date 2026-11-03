@@ -1,0 +1,37 @@
+[project]
+name = "portal-makermods"
+version = "0.1.0"
+description = "Human-in-the-loop robot learning with LiveKit Portal on a pair of MakerMods Metal arms."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "livekit-portal[rerun,lerobot]>=0.3.0rc2",
+    "livekit-api>=0.7",
+    "lerobot[hardware]>=0.6.1",
+    "numpy>=1.24",
+    "python-dotenv>=1",
+    "opencv-python>=4.5",
+    "pynput>=1.7",
+]
+# The arms' driver, `metal_sdk`, is built from source on the robot and
+# operator hosts (it links ROS 2 Humble's KDL): tutorial/07-running-the-rig.md.
+
+# `uv run robot`, `uv run teleoperator`, `uv run recorder`
+[project.scripts]
+robot = "robot:run"
+teleoperator = "teleoperator:run"
+recorder = "recorder:run"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+py-modules = ["_common", "robot", "teleoperator", "recorder"]
+packages = ["utils"]
+
+[dependency-groups]
+# Training alone needs no robot, LiveKit connection, or desktop input.
+train = ["lerobot[training]>=0.6.1"]
+# Dream-1 runs remotely; `dreamlabs` carries the client-side IK for the Metal arm.
+dream = ["dreamlabs>=1.0.23", "dreamlabs-client>=1.0.14"]

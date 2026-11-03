@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Usage: ./scripts/deploy_to_robot.sh user@host ['~/workspace/portal-makermods']
+# Syncs the source, .env and .env.local; keeps the remote data and training directories.
+set -euo pipefail
+
+REMOTE="${1:-}"
+DEST="${2:-~/workspace/portal-makermods}"
+
+if [[ -z "$REMOTE" ]]; then
+    echo "usage: $(basename "$0") user@host [remote-path]" >&2
+    echo "       remote-path defaults to ~/workspace/portal-makermods" >&2
+    exit 1
+fi
+
+if ! command -v rsync >/dev/null 2>&1; then
+    echo "rsync not found on this machine" >&2
+    exit 1
+fi
+
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+IGNORE_FILE="$HERE/scripts/deploy.rsyncignore"
+
+echo "[deploy] remote: $REMOTE:$DEST"
+echo "[deploy] ensuring remote directory exists ..."
+# Unquoted on the remote side so a leading ~ expands there. rsync below
+# expands it the same way; quoting only here would create a literal "~"
+# directory in the remote home.
+ssh "$REMOTE" "mkdir -p $DEST"
+
+echo "[deploy] syncing portal-makermods/ ..."
+rsync -azP --delete --exclude-from="$IGNORE_FILE" "$HERE/" "$REMOTE:$DEST/"
+
+cat <<EOF
+
+[deploy] done. On the robot:
+
+  cd $DEST
+  uv sync
+  # uv sync drops metal_sdk; reinstall it (tutorial/07-running-the-rig.md).
+  uv pip install ~/metal-python-ros/metal_sdk/binding
+
+  uv run robot
+
+EOF

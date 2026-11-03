@@ -1,0 +1,28 @@
+# Patterns for scripts/deploy_to_robot.sh. Same syntax as .gitignore.
+#
+# What's NOT in here is shipped to the robot, including `.env` and
+# `.env.local`, so the robot gets the same config without retyping it.
+
+# Version control
+.git/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Recorder-side only: session archives. Neither the robot nor the
+# teleoperator writes here. Multi-GB over a real collection run.
+data/
+
+# Editor/OS noise
+.vscode/
+.idea/
+.DS_Store
+
+# Training artifacts stay on the training host.
+checkpoints/
+outputs/
