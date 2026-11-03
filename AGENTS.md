@@ -29,7 +29,7 @@ Update affected chapters with behavior changes.
 - Run blocking hardware or inference off the event loop. Device calls must be
   serialized and finished before disconnecting hardware.
 - Never disable the Metal motors on stop or fault: the arms are brakeless and drop.
-- Preserve camera/CAN recovery, the soft-limit clamp, and the target-step limiter. A small clamp on
+- Preserve the soft-limit clamp, the target-step limiter, and both-arms-or-nothing reads. A small clamp on
   tracking error limits torque under MIT control and can immobilize joints.
 - Check installed library APIs when restoring older examples.
 

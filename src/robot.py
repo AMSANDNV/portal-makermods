@@ -1,9 +1,9 @@
 """Robot side: drives the pair of MakerMods Metal followers behind a Portal `Robot`.
 
-Run with `uv run robot`. Each tick reads state and camera frames from the
-two arms and three cameras, publishes them on one shared timestamp so the operator's
-synchronizer can match them into a single observation, and applies whatever
-action last cleared the active-operator gate.
+Run with `uv run robot`. Each tick reads both arms and the three cameras,
+publishes them on one shared timestamp so the operator's synchronizer can match
+them into a single observation, and applies whatever action last cleared the
+active-operator gate.
 """
 from __future__ import annotations
 
@@ -13,22 +13,19 @@ from typing import Iterator
 
 from _common import CONFIG_PATH, ROBOT_IDENTITY, HardwareThread, TickBudget, env_int, load_env, mint_token, pace, required_env
 from livekit.portal import Action, Robot, RobotConfig
-from utils.metal import build_followers, split_state_frames
+from utils.metal import build_followers
 
 
 def diagnostics(followers, budget: TickBudget) -> Iterator[str]:
-    """The 5s console lines: achieved rate, CAN health per arm, speed cap."""
+    """The 5s console lines: achieved rate, arm read errors, speed cap."""
     if line := budget.report():
         yield line
     for side, arm in followers.arms.items():
-        if arm.errors or arm.reconnects:
-            yield (f"{side} arm: {arm.errors} errors, {arm.reconnects} reopens"
-                   + (" - CURRENTLY DEGRADED" if arm.degraded else ""))
-    limiter = followers.step_limiter
-    if clamped := limiter.clamped:
-        limiter.clamped = 0
-        yield (f"speed cap: {clamped} joint commands clamped to "
-               f"{limiter.max_step_rad:g} rad in 5s")
+        if arm.errors:
+            yield f"{side} arm: {arm.errors} read errors so far"
+    if clamped := followers.limiter.clamped:
+        followers.limiter.clamped = 0
+        yield f"speed cap: {clamped} joint commands ramped in 5s"
 
 
 async def main() -> None:
@@ -82,10 +79,9 @@ async def main() -> None:
             # receiver drops anything stamped behind the newest it has from us.
             ts_us = robot.now_us()
             started = time.perf_counter()
-            observation = await hardware.run(followers.get_observation)
+            state, frames = await hardware.run(followers.get_observation)
             device_ms = (time.perf_counter() - started) * 1e3
 
-            state, frames = split_state_frames(observation, tracks)
             # Empty state means an arm is unreadable. Keep publishing video so
             # the operator can see the arm stopped, but never invent a state.
             if state:

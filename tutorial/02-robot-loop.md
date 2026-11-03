@@ -47,16 +47,15 @@ The robot starts with no active operator. On a gate change it clears its cached
 action, so the previous operator’s command is not reused while waiting for the
 new operator. If the active operator disconnects, it also releases the gate.
 
-The followers limit each commanded joint target step (`METAL_MAX_STEP_RAD`),
-keep every joint inside MakerMods' soft limits, and reseed the ramp after pauses
-or an arm reopen. An arm is never commanded before it has been read. This limits command changes during takeover; it is not
-a guarantee of physical motor speed.
+The followers ramp each joint target at most `METAL_MAX_STEP_RAD` per command,
+starting from the measured pose and again after any pause in commands, and clamp
+every joint to MakerMods' soft limits. An arm is never commanded before it has
+been read. This limits command changes during takeover; it is not a guarantee of
+physical motor speed.
 
-Camera reads reuse the last good frame during a USB interruption and reconnect
-in the background. Arm I/O failures, including motor faults the SDK reports, are counted and
-retried per arm; repeated failures reopen that arm's SDK interface on the same
-worker thread, which re-enables its motors. The target ramp resets from the
-present pose before commands resume.
+A failed arm read, or a motor fault the SDK reports, is logged and counted
+instead of ending the loop; that tick publishes no state. A camera hiccup
+serves the last good frame.
 
 Nothing in this project disables the motors, on stop or on fault: a Metal arm
 has no brakes and drops when disabled. Rest or support the arms before you stop

@@ -1,7 +1,8 @@
-# 6. Plugging in a policy
+# 7. Plugging in a policy
 
-A policy uses the same `Operator` interface as the human. This project ships two:
-ACT, trained on your own takes, and Dream Labs' Dream-1, which runs zero-shot.
+A policy uses the same `Operator` interface as the human. Chapter 4 ran
+Dream-1, which needs no data; this chapter adds ACT, trained on your own takes,
+and shows how the two work together.
 [`src/policies/act/inference.py`](../src/policies/act/inference.py) loads an ACT
 checkpoint, receives synchronized observations, and sends actions while selected
 by the teleoperator.
@@ -49,43 +50,31 @@ The policy starts without control. Press `c` in teleop to select it. When contro
 returns after a human correction, the policy resets its buffered actions before
 continuing. There is no separate SPACE engagement key or automatic claim.
 
-## Dream-1, zero-shot
+## Two policies, one interface
 
-[`src/policies/dream-1/inference.py`](../src/policies/dream-1/inference.py) runs
-Dream Labs' `dreamlabs/dream-1-beta` as another operator, `policy-dream-1`. It
-needs no training: the model runs on Dream Labs' servers and reads the task as
-a prompt. This rig is the shape Dream-1 expects: two arms and three views, so
-nothing is padded.
+Dream-1 ([chapter 4](04-dream-1.md)) and ACT both join as Portal operators and
+send the same fourteen-value actions, so the robot, the recorder, and the `c`
+handoff treat them the same. Where they differ is where they come from:
 
-```bash
-uv run --group dream python src/policies/dream-1/inference.py --task "fold the towel"
-```
+| | Dream-1 | ACT |
+|---|---|---|
+| Needs data | no: a task prompt | your takes |
+| Runs | on Dream Labs' servers | locally, on GPU, MPS, or CPU |
+| Outputs | 48-row chunks of hand poses, solved to joints by the `dream` client | joint targets every tick |
+| Strength | works on day one, on new tasks | fast, small, specialised to your task and views |
 
-The `dream` client does the arm-specific work. With `"ik": {"arm": "metal",
-"head": "eef"}` it uses Dream's own model of the Metal arm and its tool center
-point, so there is no `dreamcli tcp` step. On every request it adds each hand's
-pose, computed from the joints, and it solves the model's hand poses back to
-joints. The policy maps between Portal and the model:
+## Distill Dream-1 into ACT
 
-| Portal | Dream-1 |
-|---|---|
-| `overhead_camera`, `left_wrist_camera`, `right_wrist_camera` | `video.overhead`, `video.wrist_l`, `video.wrist_r`: center-cropped to 16:9, 320x176 JPEG |
-| `left_joint1..6.pos`, `right_joint1..6.pos` (rad) | `state.left_arm`, `state.right_arm`, unchanged |
-| `left_gripper.pos`, `right_gripper.pos` (mm) | `state.<side>_grip` = mm / 100, Dream's Metal grip scale |
+The two fit together. Dream-1 is the teacher: run it on your task and correct
+it with the leaders whenever it slips (chapters 5 and 6). Every take records
+Dream-1's motion and your fixes in one episode. Convert those takes and train
+ACT on them, and ACT becomes a small local student of Dream-1 on your task,
+already including your corrections. From then on, run ACT and keep correcting
+it; each round of corrections is the next training set.
 
-Each reply is 48 rows per arm, `q_l_chunk` and `q_r_chunk`. The policy plays
-them at 20 rows a second and asks for the next chunk early, on a worker thread,
-when `client.refill_due()` says so. Rows that the round trip used up are skipped.
-Each tick moves the commanded target at most `DREAM_MAX_JOINT_RAD_S / fps` per
-joint and 5% of the grip range per row, and keeps every joint inside the Metal
-soft limits. While the newest observation is older than 0.2 s, or no row is due,
-it sends nothing and the arms hold.
-
-Every handoff to Dream-1 starts a new episode: `reset_episode()`, an empty frame
-window, and a ramp from where the arms are. `--dry-run` prints the targets
-instead of sending them; try it first. Set the API key in
-`~/.dreamlabs/credentials` as Dream Labs' Getting started describes. A model
-that is starting answers `pool_warming`, and the policy waits and asks again.
+Discard (`[`) takes where Dream-1 did something you would not want copied,
+and keep the cameras and the task prompt the same across both policies: ACT
+only knows the views it was trained on.
 
 ## Train and extend
 
@@ -98,4 +87,4 @@ checks, and field-order validation. Replace the model loading and preprocessing
 with the new model’s requirements. The robot and recorder need no model-specific
 changes.
 
-Next: [07. Running the rig](07-running-the-rig.md).
+Next: [08. Running the rig](08-running-the-rig.md).

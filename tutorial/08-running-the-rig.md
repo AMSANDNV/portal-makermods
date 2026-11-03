@@ -1,4 +1,4 @@
-# 7. Running the rig
+# 8. Running the rig
 
 This chapter runs the full cycle: collect demonstrations, train ACT, run the
 policy, and record human corrections for the next training run.
@@ -184,23 +184,20 @@ Train on that dataset with a new output directory, then repeat the policy and
 correction cycle. To rebuild an existing dataset root, conversion requires
 `--overwrite`; it does not append to a non-empty root.
 
-## Run Dream-1 zero-shot
+## Run Dream-1 and distill it into ACT
 
-Dream-1 needs no dataset. On any host with internet access, save your Dream Labs
-API key as their [Getting started](https://platform.dreamlabs.ai/api-documentation/)
-describes (`~/.dreamlabs/credentials`), then, with the robot, recorder, and
-teleoperator running:
+Dream-1 needs no dataset ([chapter 4](04-dream-1.md)). With your API key in
+`~/.dreamlabs/credentials` and the robot, recorder, and teleoperator running:
 
 ```bash
 uv sync --group dream
 uv run --group dream python src/policies/dream-1/inference.py --task "fold the towel" --dry-run
 ```
 
-It joins as `policy-dream-1`. The dry run prints its targets once a second
-without moving the arms; check that they are near the arms' pose and move the
-right way. Then run without `--dry-run`, and hand it control with `c` as with
-ACT. The first request to a cold model may wait in `pool_warming` for a while.
-Takes recorded with Dream-1 and your corrections convert and train like any other.
+Check the printed targets, then run without `--dry-run`. To distill it into ACT
+([chapter 7](07-plugging-in-policies.md#distill-dream-1-into-act)), record takes
+as in [Run ACT and collect corrections](#run-act-and-collect-corrections) with
+`policy-dream-1` in place of ACT, then convert and train as above.
 
 ## Deploy and troubleshoot
 
@@ -240,20 +237,14 @@ shell values. Relative output paths use the working directory.
 | Variable | Default | Notes |
 |---|---|---|
 | `METAL_URDF` | `~/metal-python-ros/metal_sdk/example/urdf/metal_with_gripper.urdf` | the SDK's arm model |
-| `METAL_END_TYPE` | `3` | SDK `arm_end_type`: gripper and teaching pendant, as the vendor's launches use |
 | `METAL_FOLLOWER_RIGHT_CAN`, `METAL_FOLLOWER_LEFT_CAN` | `can1`, `can3` | robot host |
 | `METAL_LEADER_RIGHT_CAN`, `METAL_LEADER_LEFT_CAN` | `can0`, `can2` | teleop host |
 | `METAL_CAM_OVERHEAD`, `METAL_CAM_LEFT_WRIST`, `METAL_CAM_RIGHT_WRIST` | `/dev/video0`, `/dev/video2`, `/dev/video4` | Linux: `/dev/videoN`. macOS: an integer index. |
 | `METAL_CAM_WIDTH` / `_HEIGHT` | `640` / `480` | a 16:9 mode such as 1280x720 suits Dream-1 better; it center-crops otherwise |
-| `METAL_CAM_MAX_FRAME_AGE_MS` | `500` | how old a buffered frame may be before the tick logs it stale and serves it anyway |
-| `METAL_BUS_ERRORS_BEFORE_RECONNECT` | `5` | consecutive failures of one arm before its SDK interface is reopened |
-| `METAL_BUS_RECONNECT_INTERVAL_S` | `2.0` | minimum seconds between reopen attempts |
 | `METAL_MAX_STEP_RAD` | `0.087` | maximum joint target step per command (about 5°); `0` disables the limit |
-| `METAL_MAX_LAG_RAD` | `0.5` | how far the target may lead a joint that cannot follow |
-| `METAL_UNCAPPED_JOINTS` | `left_gripper,right_gripper` | fields the ramp skips |
 
 `METAL_MAX_STEP_RAD` limits target movement per command (0.087 rad × 30 Hz is
-about 2.6 rad/s). Use a lower value for bring-up. The arm joints run impedance
+about 2.6 rad/s). Use a lower value for bring-up. Grippers are not ramped. The arm joints run impedance
 control: ramping the target preserves torque, while a small tracking-error
 clamp can prevent motion. Every command is also clamped to MakerMods' soft
 limits, and the grippers to their 0–80 mm stroke.
@@ -263,7 +254,6 @@ limits, and the grippers to their 0–80 mm stroke.
 | Variable | Default | Notes |
 |---|---|---|
 | `DREAM_CHECKPOINT` | `dreamlabs/dream-1-beta` | a base model or your fine-tune |
-| `DREAM_CAMERAS` | `overhead=overhead_camera,wrist_l=left_wrist_camera,wrist_r=right_wrist_camera` | role to track; an unmapped role gets black frames |
 | `DREAM_MAX_JOINT_RAD_S` | `0.5` | cap on commanded joint speed; also the ramp in after a handoff |
 
 ### Training
@@ -296,12 +286,11 @@ CUDA/MPS/CPU automatically, and waits for the `c` handoff before producing actio
 - **No observations in ACT:** every declared camera must publish; the checkpoint
   must use cameras available in `portal.yaml`.
 - **Arm errors:** the robot's 5 s line names the arm. Check its CAN link
-  (`ip link`), adapter, and power. A reopen re-energizes the arm; keep the
-  leaders still during recovery. `metal_sdk is not installed`: see
+  (`ip link`), adapter, and power, then restart the robot. `metal_sdk is not installed`: see
   [The Metal SDK](#the-metal-sdk-robot-and-teleop-hosts).
 - **Dream-1 refuses or stalls:** a `DreamAuthError` means the key in
-  `~/.dreamlabs/credentials`; `pool_warming` means the model is starting. A
-  missing camera track stops it sending anything: check `DREAM_CAMERAS`.
+  `~/.dreamlabs/credentials`; `pool_warming` means the model is starting. It
+  sends nothing until all three cameras publish.
 - **Low frame rate:** compare device and tick times in robot diagnostics. Lower
   the requested rate or camera resolution if the hardware cannot keep up.
 - **Archive writer drops:** lower JPEG quality or resolution. Check disk capacity.

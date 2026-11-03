@@ -45,7 +45,7 @@ The bitrate setting is a ceiling, not a target.
 MJPEG sends independent JPEG frames over the reliable data channel. That avoids
 inter-frame prediction but can delay state when video exceeds available
 bandwidth. PNG and RAW use the same channel with larger payloads. See
-[Running the rig](07-running-the-rig.md#configuration) for settings.
+[Running the rig](08-running-the-rig.md#configuration) for settings.
 
 State and actions go over unreliable data packets, Portal's default. A reliable
 channel retransmits a lost packet and holds every newer one until it arrives; at

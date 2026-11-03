@@ -1,192 +1,103 @@
-"""Robot safety test: what the arms do when things go wrong.
+"""Robot safety: what the arms do when things go wrong. No hardware, no server.
 
-    uv run python -m test.test_resilience      (no LiveKit server, no hardware)
-
-Layers between the network and the motors, all in `src/utils/metal.py`:
-
-`ResilientArm`: a CAN read or command that fails must not raise out of
-`HardwareThread.run` and end the tick loop mid-motion; after a run of failures
-the arm is reopened, with a backoff.
-
-`StepLimiter`: the commanded target advances at most `max_step_rad` per
-command. The case that matters is the discontinuity: after a fault an arm has
-sagged and the leader has not moved, so an unramped command would send it
-straight back at full speed. The cap ramps the TARGET; it must never clamp the
-tracking error, because under impedance control that error is the torque.
-
-`MetalFollowers`: a state row is published only when both arms read, an arm is
-never commanded before it was read, and every command lands inside the soft limits.
-
-The fake stands in for `MetalArm` at exactly the surface the wrappers touch.
+    uv run python -m test.test_resilience
 """
 from __future__ import annotations
 
 import math
 import sys
 
-from utils.metal import (
-    JOINT_LIMITS_RAD, MetalFollowers, MetalLeaders, ResilientArm, StepLimiter, arm_fields, clamp_to_limits,
-)
+from utils.metal import LIMITS_RAD, Arm, Followers, Leaders, StepLimiter, arm_fields, clamp_to_limits
 from test._harness import Checks
 
-ERRORS_BEFORE_RECONNECT = 3
 HOME = [0.0, -1.2, 1.5, 0.0, 0.0, 0.0, 40.0]  # inside every soft limit; gripper half open
 
 
-class FakeArm:
-    """Fails I/O while `failing` is set; `reconnect` counts and may fail."""
+class FakeSDK:
+    """Stands in for `MetalSDKInterface` at the calls `Arm` makes."""
 
-    def __init__(self, side: str, role: str = "follower", reconnect_fails: int = 0) -> None:
-        self.side, self.role = side, role
-        self.failing = False
-        self.reconnect_fails = reconnect_fails
-        self.reconnects = 0
-        self.connected = False
-        self.pose = list(HOME)
-        self.commands: list[list[float]] = []
+    def __init__(self):
+        self.fault, self.raises, self.commands = False, False, []
 
-    def connect(self) -> None:
-        self.connected = True
+    def GetJointErrorCode(self):
+        return [1, 2 if self.fault else 1, 1, 1, 1, 1, 1]
 
-    def read(self) -> list[float]:
-        if self.failing:
-            raise RuntimeError("joint2 motor disconnected")
-        return list(self.pose)
+    def GetJointPosition(self):
+        if self.raises:
+            raise OSError("CAN read failed")
+        return list(HOME)
 
-    def command(self, values) -> None:
-        if self.failing:
-            raise OSError("write failed: [Errno 105] No buffer space available")
+    def SetFollowerArmJointPosition(self, values):
         self.commands.append(list(values))
-
-    def reconnect(self) -> None:
-        self.reconnects += 1
-        if self.reconnects <= self.reconnect_fails:
-            raise RuntimeError("Init() failed")
-
-    def disconnect(self) -> None:
-        self.connected = False
 
 
 class FakeCamera:
-    def __init__(self, name):
-        self.name = name
-
-    def connect(self):
-        pass
-
-    def disconnect(self):
-        pass
-
-    def read_latest(self):
-        return f"{self.name}-frame"
+    def read(self):
+        return "frame"
 
 
-def resilient(arm, interval=0.0):
-    return ResilientArm(arm, errors_before_reconnect=ERRORS_BEFORE_RECONNECT, reconnect_interval_s=interval)
+def arm(side):
+    a = Arm(side, "can0", leader=False)
+    a._sdk = FakeSDK()
+    return a
 
 
-def followers(step=0.1, lag=0.5):
-    arms = {side: resilient(FakeArm(side)) for side in ("left", "right")}
-    limiter = StepLimiter(step, lag, uncapped=("left_gripper", "right_gripper"))
-    return MetalFollowers(arms, {"overhead_camera": FakeCamera("overhead_camera")}, limiter)
+def pair(step=0.1):
+    return Followers({s: arm(s) for s in ("left", "right")}, {"overhead_camera": FakeCamera()}, StepLimiter(step))
 
 
-def action_for(pose_left, pose_right):
-    return dict(zip(arm_fields("left"), pose_left)) | dict(zip(arm_fields("right"), pose_right))
+def action(left, right):
+    return dict(zip(arm_fields("left"), left)) | dict(zip(arm_fields("right"), right))
 
 
 def main() -> int:
     c = Checks("robot safety")
 
-    # -- a transient failure must not raise, and must not reconnect ----------
-    fake = FakeArm("left")
-    arm = resilient(fake)
-    fake.failing = True
-    c.check(arm.read() is None, "a failed read returns None instead of raising")
-    c.check(arm.command(HOME) is False, "a failed command returns False instead of raising")
-    c.check(arm.errors == 2 and fake.reconnects == 0, "below the threshold nothing is reopened",
-            f"errors={arm.errors}")
-    c.check(arm.degraded, "the fault is visible while it lasts")
+    a = arm("left")
+    a._sdk.raises = True
+    c.check(a.read() is None and a.errors == 1, "a failed read returns None instead of raising")
+    a._sdk.raises, a._sdk.fault = False, True
+    c.check(a.read() is None, "a motor fault code counts as a failed read")
 
-    # -- a sustained failure reopens the arm, and recovery is reported ------
-    recovered: list[str] = []
-    arm.on_recovered = recovered.append
-    arm.read()
-    c.check(fake.reconnects == 1 and arm.reconnects == 1, "the threshold reopens the arm",
-            f"reconnects={fake.reconnects}")
-    c.check(recovered == ["left arm reopened"], "recovery is reported, so the ramp re-seeds", str(recovered))
-    fake.failing = False
-    c.check(arm.read() == HOME and not arm.degraded, "and it reads again afterwards")
+    p = pair()
+    state, frames = p.get_observation()
+    c.check(len(state) == 14 and frames == {"overhead_camera": "frame"}, "both arms read: fourteen values and video")
+    p.arms["right"]._sdk.fault = True
+    state, frames = p.get_observation()
+    c.check(state == {} and frames, "one arm unreadable: no state at all, but video keeps flowing")
 
-    # -- backoff: a reopen is not attempted every tick -----------------------
-    fake = FakeArm("right", reconnect_fails=99)
-    arm = resilient(fake, interval=30.0)
-    fake.failing = True
-    for _ in range(ERRORS_BEFORE_RECONNECT * 10):
-        arm.command(HOME)
-    c.check(fake.reconnects == 1, "the backoff holds off a reopen storm", f"reconnects={fake.reconnects}")
+    p = pair()
+    p.send_action(action(HOME, HOME))
+    c.check(not p.arms["left"]._sdk.commands, "no command before the first observation")
 
-    # -- the pair publishes both arms or nothing -----------------------------
-    pair = followers()
-    observation = pair.get_observation()
-    c.check(len([k for k in observation if k.endswith(".pos")]) == 14, "both arms read: fourteen state values")
-    c.check(observation.get("overhead_camera") == "overhead_camera-frame", "and the camera frame")
-    pair.arms["right"].arm.failing = True
-    observation = pair.get_observation()
-    c.check(not any(k.endswith(".pos") for k in observation),
-            "one arm unreadable: no state at all, never half a row", str(sorted(observation)))
-    c.check("overhead_camera" in observation, "while video keeps flowing")
+    p = pair(step=0.1)
+    p.get_observation()
+    far = [1.0] + HOME[1:6] + [0.0]  # joint1 a radian away, gripper closed
+    p.send_action(action(far, HOME))
+    sent = p.arms["left"]._sdk.commands[-1]
+    c.check(math.isclose(sent[0], 0.1), "a far target advances by max_step", str(sent[0]))
+    c.check(sent[6] == 0.0, "the gripper is not ramped", str(sent[6]))
+    p.send_action(action(far, HOME))
+    c.check(math.isclose(p.arms["left"]._sdk.commands[-1][0], 0.2), "the ramp continues from the last target")
 
-    # -- an arm is never commanded before it was read ------------------------
-    pair = followers()
-    pair.send_action(action_for(HOME, HOME))
-    c.check(not pair.arms["left"].arm.commands and not pair.arms["right"].arm.commands,
-            "no command before the first observation")
-
-    # -- the ramp moves the target, a step at a time -------------------------
-    pair = followers(step=0.1)
-    pair.get_observation()
-    far = list(HOME)
-    far[0] = 1.0  # joint1 one radian away
-    far[6] = 0.0  # close the gripper
-    pair.send_action(action_for(far, HOME))
-    sent = pair.arms["left"].arm.commands[-1]
-    c.check(math.isclose(sent[0], 0.1), "a far target advances by max_step_rad", str(sent[0]))
-    c.check(sent[6] == 0.0, "the gripper is uncapped and closes in one command", str(sent[6]))
-    pair.send_action(action_for(far, HOME))
-    sent = pair.arms["left"].arm.commands[-1]
-    c.check(math.isclose(sent[0], 0.2), "the next command continues from the last target, not the present pose",
-            str(sent[0]))
-
-    # -- the lag bound stops the target running away -------------------------
-    limiter = StepLimiter(0.3, 0.5)
-    limiter.observe({"left_joint1.pos": 0.0})
+    limiter = StepLimiter(0.3)
+    limiter.present = {"left_joint1.pos": 0.0}
     for _ in range(10):
-        stepped = limiter.step({"left_joint1.pos": 3.0})
-    c.check(math.isclose(stepped["left_joint1.pos"], 0.5),
-            "an arm that cannot follow holds the target max_lag_rad ahead", str(stepped))
+        out = limiter.step({"left_joint1.pos": 3.0})
+    c.check(math.isclose(out["left_joint1.pos"], StepLimiter.MAX_LAG), "a stuck joint's target leads by MAX_LAG at most")
+    limiter = StepLimiter(0.0)
+    limiter.present = {"left_joint1.pos": 0.0}
+    c.check(limiter.step({"left_joint1.pos": 2.0}) == {"left_joint1.pos": 2.0}, "max_step 0 disables the ramp")
 
-    # -- off means off -------------------------------------------------------
-    limiter = StepLimiter(0.0, 0.5)
-    limiter.observe({"left_joint1.pos": 0.0})
-    c.check(limiter.step({"left_joint1.pos": 2.0}) == {"left_joint1.pos": 2.0},
-            "max_step_rad=0 disables the cap entirely")
+    clamped = clamp_to_limits(action([9, 9, -9, 9, 9, 9, 500], [-9] * 6 + [-5]))
+    joints_ok = all(lo <= clamped[f"{s}_joint{i + 1}.pos"] <= hi
+                    for s in ("left", "right") for i, (lo, hi) in enumerate(LIMITS_RAD))
+    c.check(joints_ok, "every joint lands inside its soft limit")
+    c.check(clamped["left_gripper.pos"] == 80.0 and clamped["right_gripper.pos"] == 0.0, "grippers stay in 0-80 mm")
 
-    # -- soft limits ---------------------------------------------------------
-    wild = action_for([9.0, 9.0, -9.0, 9.0, 9.0, 9.0, 500.0], [-9.0] * 6 + [-5.0])
-    clamped = clamp_to_limits(wild)
-    left = [clamped[k] for k in arm_fields("left")]
-    right = [clamped[k] for k in arm_fields("right")]
-    c.check(all(lo <= v <= hi for v, (lo, hi) in zip(left, JOINT_LIMITS_RAD))
-            and all(lo <= v <= hi for v, (lo, hi) in zip(right, JOINT_LIMITS_RAD)),
-            "every joint lands inside its soft limit")
-    c.check(left[6] == 80.0 and right[6] == 0.0, "grippers stay inside their 0-80 mm stroke",
-            f"{left[6]}, {right[6]}")
-
-    # -- leaders: both or nothing --------------------------------------------
-    leaders = MetalLeaders({side: resilient(FakeArm(side, "leader")) for side in ("left", "right")})
+    leaders = Leaders({s: arm(s) for s in ("left", "right")})
     c.check(len(leaders.get_action()) == 14, "both leaders read: one fourteen-value action")
-    leaders.arms["left"].arm.failing = True
+    leaders.arms["left"]._sdk.raises = True
     c.check(leaders.get_action() == {}, "one leader unreadable: no action, never half of one")
     return c.exit_code
 

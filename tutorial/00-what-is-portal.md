@@ -21,7 +21,7 @@ may control the robot.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/hitl-room-dark.svg">
-  <img alt="The robot, human teleoperator, ACT policy, and recorder in one LiveKit room, sharing camera video, state and actions, the active_operator attribute and the robot clock." src="images/hitl-room-light.svg" width="100%">
+  <img alt="The robot (a pair of Metal followers and three cameras), the human on two leader arms, the Dream-1 and ACT policies, and the recorder in one LiveKit room, sharing camera video, state and actions, the active_operator attribute and the robot clock." src="images/hitl-room-light.svg" width="100%">
 </picture>
 
 The human and policy use the same operator interface. The robot accepts actions
@@ -40,6 +40,6 @@ it as a second operator. Human corrections go into the same archive as policy
 actions, ready for another training run.
 
 The code snippets in these chapters show the relevant parts of the runnable
-files, rather than standalone programs. Chapter 7 has the complete commands.
+files, rather than standalone programs. Chapter 8 has the complete commands.
 
 Next: [01. Wire contract](01-wire-contract.md).
