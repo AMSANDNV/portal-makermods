@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 
-from _common import CONFIG_PATH, RECORDER_IDENTITY, env_int, env_str, load_env, mint_token, required_env
+from utils.common import CONFIG_PATH, RECORDER_IDENTITY, env_int, env_str, load_env, mint_token, required_env
 from livekit.portal import Observer, ObserverConfig
 from livekit.portal.recording import RrdSink
 

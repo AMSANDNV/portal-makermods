@@ -11,7 +11,7 @@ import dream
 import numpy as np
 from livekit.portal import OperatorConfig
 
-from _common import CONFIG_PATH, ROOT
+from utils.common import CONFIG_PATH, ROOT
 from utils.metal import LIMITS_RAD, arm_fields
 
 _spec = importlib.util.spec_from_file_location("dream1", ROOT / "src/policies/dream-1/inference.py")

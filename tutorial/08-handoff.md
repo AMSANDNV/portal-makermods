@@ -1,4 +1,4 @@
-# 6. Handoff
+# 8. Handoff
 
 HITL uses two operators in one room: the human and the policy. The robot’s
 active-operator gate accepts only one sender at a time.
@@ -52,4 +52,6 @@ inference result is discarded.
 The follower’s step limiter bounds changes to commanded targets. Clearing the
 gate stops accepting new operator actions; it does not disable motor torque.
 
-Next: [07. Plugging in a policy](07-plugging-in-policies.md).
+---
+
+Previous: [7. HITL recording](07-hitl-recording.md) · [Tutorial index](../README.md#the-tutorial) · Next: [9. Configuration and troubleshooting](09-reference.md)

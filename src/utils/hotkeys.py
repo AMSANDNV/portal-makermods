@@ -2,7 +2,7 @@
 
 Two sources, merged by `drain()`: a global tap (pynput) that hears keys while
 the rerun window has focus, and the terminal, which also works under Wayland
-and over SSH. See tutorial/03-operator-loop.md.
+and over SSH. See tutorial/06-operator-loop.md.
 """
 from __future__ import annotations
 

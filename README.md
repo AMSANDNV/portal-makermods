@@ -19,34 +19,28 @@ policy.
 
 ## The tutorial
 
-Read the chapters in order to build the loop, one Portal concept at a time.
+Start with **[01. Your first recording](tutorial/01-first-recording.md)** if you
+have the hardware ready. Read chapter 00 first for the vocabulary and overview.
+The first three hands-on chapters take you from a demonstration to a policy you
+can correct; the remaining chapters explain the code and settings.
 
-| Chapter | What you’ll learn |
+| Chapter | What you’ll do or learn |
 |---|---|
-| [00. What is Portal?](tutorial/00-what-is-portal.md) | Robot, operator, and observer roles in a HITL session |
-| [01. Wire contract](tutorial/01-wire-contract.md) | Share camera, state, and action schemas across peers |
-| [02. Robot loop](tutorial/02-robot-loop.md) | Publish observations and apply accepted actions |
-| [03. Operator loop](tutorial/03-operator-loop.md) | Read the leaders, display video, and anchor actions |
-| [04. A policy to interrupt: Dream-1](tutorial/04-dream-1.md) | Run a generalist policy before you have any data |
-| [05. HITL recording](tutorial/05-hitl-recording.md) | Record both operators and build a training dataset |
-| [06. Handoff](tutorial/06-handoff.md) | Switch between human and policy without ending a take |
-| [07. Plugging in a policy](tutorial/07-plugging-in-policies.md) | Run ACT, and distill Dream-1 into it |
-| [08. Running the rig](tutorial/08-running-the-rig.md) | Set up, collect, train, run inference, and record corrections |
+| [00. What is Portal?](tutorial/00-what-is-portal.md) | Meet the robot, operator, policy, and recorder |
+| [01. Your first recording](tutorial/01-first-recording.md) | Set up the rig, record a take, and convert it to a dataset |
+| [02. Try Dream-1 (optional)](tutorial/02-dream-1.md) | Run a policy without training data and record corrections |
+| [03. Train ACT](tutorial/03-train-act.md) | Train on your takes, run ACT, and improve it with corrections |
+| [04. Shared schema](tutorial/04-wire-contract.md) | Understand the camera, state, and action contract |
+| [05. Robot loop](tutorial/05-robot-loop.md) | Follow observations out and accepted actions back in |
+| [06. Operator loop](tutorial/06-operator-loop.md) | Read the leaders, display video, and timestamp actions |
+| [07. Recording](tutorial/07-hitl-recording.md) | Understand takes, action timestamps, and dataset alignment |
+| [08. Handoff](tutorial/08-handoff.md) | See how control switches without ending a take |
+| [09. Configuration and troubleshooting](tutorial/09-reference.md) | Look up settings, deployment steps, and fixes |
 
-## Quick start
-
-On each host, after building MakerMods' `metal_sdk` on the arm hosts
-([08. Running the rig](tutorial/08-running-the-rig.md#the-metal-sdk-robot-and-teleop-hosts)):
-
-```bash
-cp .env.example .env        # LiveKit URL, key, secret, and room
-uv sync
-uv pip install ~/metal-python-ros/metal_sdk/binding   # arm hosts only
-
-uv run robot                # followers + cameras; start it first
-uv run recorder             # writes data/sessions/*.rrd
-uv run teleoperator         # leaders; c = control, r = record, x = quit
-```
+For a first run, you need the Metal arms and cameras, a LiveKit server, Python
+3.12, and `uv`. Chapter 1 walks through the SDK and host setup. A Dream Labs API
+key is only needed for Dream-1; a CUDA training machine is only needed for ACT.
+You can also run the [hardware-free checks](test/README.md).
 
 The Metal arms have no brakes and this project never switches their motors
 off: rest or support the arms before stopping the robot or teleop.
@@ -59,7 +53,7 @@ src/
   robot.py              # publish observations and apply actions
   teleoperator.py       # leader arms, handoff, and episode markers
   recorder.py           # observer writing session archives
-  _common.py            # environment, tokens, and pacing
+  utils/common.py       # environment, tokens, and pacing
   utils/metal.py        # the Metal arms and cameras
   utils/                # hotkeys, preview, task prompts
   policies/dream-1/     # Dream-1 as a Portal operator
@@ -68,14 +62,3 @@ tutorial/               # the HITL walkthrough
 scripts/                # deployment helper
 test/                   # hardware-free checks
 ```
-
-## Requirements
-
-- A LiveKit server with URL, API key, and API secret.
-- Two Metal followers and two Metal leaders on CAN, with MakerMods' `metal_sdk`
-  built on the arm hosts (Ubuntu 22.04, ROS 2 Humble).
-- Three USB cameras: overhead, left wrist, right wrist.
-- Python 3.12 and `uv`.
-- A Dream Labs API key for Dream-1, and a CUDA machine for training ACT.
-
-See [test/README.md](test/README.md) for hardware-free checks.

@@ -3,7 +3,7 @@
 Each arm is one `MetalSDKInterface` (github.com/makermods-robotics/metal-python-ros)
 on its own CAN link. It reads and takes seven values: joint1..joint6 in radians,
 then the gripper stroke in mm (0 closed, 80 open). A leader floats in gravity
-compensation; a follower tracks targets. See tutorial/02-robot-loop.md.
+compensation; a follower tracks targets. See tutorial/05-robot-loop.md.
 
 Nothing here disables the motors: a Metal arm has no brakes and drops.
 """
@@ -15,7 +15,7 @@ import platform
 import time
 from pathlib import Path
 
-from _common import env_camera_id, env_float, env_int, env_str
+from utils.common import env_camera_id, env_float, env_int, env_str
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class Arm:
         try:
             from metal_sdk import ControlMode, MetalSDKInterface
         except ImportError as exc:
-            raise RuntimeError("metal_sdk is not installed: see tutorial/08-running-the-rig.md") from exc
+            raise RuntimeError("metal_sdk is not installed: see tutorial/01-first-recording.md") from exc
         urdf = Path(env_str("METAL_URDF", "~/metal-python-ros/metal_sdk/example/urdf/metal_with_gripper.urdf"))
         # arm_end_type 3: gripper and teaching pendant, as the vendor's launches use.
         sdk = MetalSDKInterface(can_id=self.can_id, urdf_path=str(urdf.expanduser()), arm_end_type=3, enable_arm=True)

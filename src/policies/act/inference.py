@@ -16,7 +16,7 @@ from lerobot.processor.converters import policy_action_to_transition, transition
 from lerobot.processor.pipeline import DataProcessorPipeline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from _common import CONFIG_PATH, HardwareThread, env_int, load_env, mint_token, pace, required_env
+from utils.common import CONFIG_PATH, HardwareThread, env_int, load_env, mint_token, pace, required_env
 from livekit.portal import Operator, OperatorConfig, frame_bytes_to_numpy_rgb
 
 IDENTITY = "policy-act"

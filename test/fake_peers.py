@@ -32,7 +32,7 @@ from livekit.portal import (
 
 from livekit.portal.recording import RrdSink
 
-from _common import RECORDER_IDENTITY, mint_token, pace
+from utils.common import RECORDER_IDENTITY, mint_token, pace
 from teleoperator import View
 from test._harness import (
     SEEN_ACTION_IDX,

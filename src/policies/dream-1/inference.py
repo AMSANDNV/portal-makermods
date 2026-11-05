@@ -3,7 +3,7 @@
 Dream-1 runs on Dream Labs' servers. It reads three views and both arms, and
 answers 48 rows of hand poses per arm. The `dream` client turns our joints into
 hand poses and its answer back into joints, with Dream's own model of the Metal
-arm (`"ik": {"arm": "metal"}`). See tutorial/04-dream-1.md.
+arm (`"ik": {"arm": "metal"}`). See tutorial/02-dream-1.md.
 
     uv run --group dream python src/policies/dream-1/inference.py --task "fold the towel" --dry-run
 """
@@ -21,7 +21,7 @@ import dream
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from _common import CONFIG_PATH, HardwareThread, env_float, env_int, env_str, load_env, mint_token, pace, required_env
+from utils.common import CONFIG_PATH, HardwareThread, env_float, env_int, env_str, load_env, mint_token, pace, required_env
 from livekit.portal import Operator, OperatorConfig, frame_bytes_to_numpy_rgb
 from utils.metal import GRIPPER_MAX_MM, SIDES, arm_fields, clamp_to_limits
 

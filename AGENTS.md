@@ -7,7 +7,7 @@ Keep it small and readable. The README leads with the numbered `tutorial/`.
 ## Structure
 
 - `src/robot.py`, `src/teleoperator.py`, and `src/recorder.py` show the Portal flows.
-- `src/_common.py` holds shared environment, token, and scheduling helpers.
+- `src/utils/common.py` holds shared environment, token, and scheduling helpers.
 - `src/utils/metal.py` drives the Metal pair through MakerMods' `metal_sdk` (imported lazily);
   `src/utils/` also holds preview, hotkey, and task-prompt details.
 - `src/policies/act/` contains training, inference, and a SkyPilot example.

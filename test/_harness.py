@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from test import ROOT
-from _common import CONFIG_PATH
+from utils.common import CONFIG_PATH
 
 FPS = 30
 

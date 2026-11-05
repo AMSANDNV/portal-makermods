@@ -1,4 +1,4 @@
-# 3. Operator loop
+# 6. Operator loop
 
 Open [`src/teleoperator.py`](../src/teleoperator.py).
 The human operator receives video, reads both leader arms, and sends one action
@@ -45,7 +45,7 @@ operator, such as `policy-act`. With only teleop connected, `c` selects teleop.
 There is no background loop that reclaims the gate after you hand it away.
 
 The leaders keep publishing while the policy drives, but the robot rejects
-its actions until the human is active again. Chapter 6 follows this handoff.
+its actions until the human is active again. Chapter 8 follows this handoff.
 
 ## Mark a take
 
@@ -63,4 +63,6 @@ Keys work globally where desktop permissions allow, and in the teleoperator’s
 terminal as a fallback. Start the recorder before marking a take. A
 `NOT RECORDED` message means the marker did not reach an observer.
 
-Next: [04. A policy to interrupt: Dream-1](04-dream-1.md).
+---
+
+Previous: [5. Robot loop](05-robot-loop.md) · [Tutorial index](../README.md#the-tutorial) · Next: [7. HITL recording](07-hitl-recording.md)

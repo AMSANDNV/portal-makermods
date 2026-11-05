@@ -6,7 +6,7 @@ this process marks where takes start and end with keypoints.
 
 Every action names the frame it answers in `in_reply_to_ts_us`: the operator
 flies on video, which is usually a tick or two behind the state.
-See tutorial/03-operator-loop.md.
+See tutorial/06-operator-loop.md.
 
 Hotkeys: `c` cycle control, `r` toggle recording, `[` discard the take, `x` quit,
 `1`-`9` switch task.
@@ -18,7 +18,7 @@ import time
 from collections import deque
 from typing import Optional
 
-from _common import CONFIG_PATH, TELEOPERATOR_IDENTITY, HardwareThread, env_int, load_env, mint_token, pace, required_env
+from utils.common import CONFIG_PATH, TELEOPERATOR_IDENTITY, HardwareThread, env_int, load_env, mint_token, pace, required_env
 from livekit.portal import Operator, OperatorConfig, VideoFrameData, frame_bytes_to_numpy_rgb
 from utils.hotkeys import Hotkeys, input_backend_warning
 from utils.metal import build_leaders

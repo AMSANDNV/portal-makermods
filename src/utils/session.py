@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sys
 
-from _common import env_str
+from utils.common import env_str
 
 DEFAULT_TASK = "MakerMods Metal bimanual manipulation"
 MAX_TASKS = 9

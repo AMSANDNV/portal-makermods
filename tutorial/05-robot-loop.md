@@ -1,4 +1,4 @@
-# 2. Robot loop
+# 5. Robot loop
 
 Open [`src/robot.py`](../src/robot.py).
 The loop reads both Metal followers and the three cameras, publishes
@@ -62,4 +62,6 @@ has no brakes and drops when disabled. Rest or support the arms before you stop
 the robot. These hardware details stay in `src/utils/metal.py` so the Portal
 loop remains readable.
 
-Next: [03. Operator loop](03-operator-loop.md).
+---
+
+Previous: [4. The wire contract](04-wire-contract.md) · [Tutorial index](../README.md#the-tutorial) · Next: [6. Operator loop](06-operator-loop.md)

@@ -11,7 +11,7 @@ import asyncio
 import time
 from typing import Iterator
 
-from _common import CONFIG_PATH, ROBOT_IDENTITY, HardwareThread, TickBudget, env_int, load_env, mint_token, pace, required_env
+from utils.common import CONFIG_PATH, ROBOT_IDENTITY, HardwareThread, TickBudget, env_int, load_env, mint_token, pace, required_env
 from livekit.portal import Action, Robot, RobotConfig
 from utils.metal import build_followers
 

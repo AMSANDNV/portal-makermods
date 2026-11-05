@@ -1,4 +1,4 @@
-# 1. The wire contract
+# 4. The wire contract
 
 Every participant needs the same camera tracks, state fields, action fields,
 and observation rate. Put them in one file so the robot, human, policy, and
@@ -45,7 +45,7 @@ The bitrate setting is a ceiling, not a target.
 MJPEG sends independent JPEG frames over the reliable data channel. That avoids
 inter-frame prediction but can delay state when video exceeds available
 bandwidth. PNG and RAW use the same channel with larger payloads. See
-[Running the rig](08-running-the-rig.md#configuration) for settings.
+[Configuration](09-reference.md#configuration) for settings.
 
 State and actions go over unreliable data packets, Portal's default. A reliable
 channel retransmits a lost packet and holds every newer one until it arrives; at
@@ -65,4 +65,6 @@ Every declared camera must publish. The human operator waits for a frame from
 each before assigning observation anchors; synchronized observations for the
 policy also depend on those tracks.
 
-Next: [02. Robot loop](02-robot-loop.md).
+---
+
+Previous: [3. Train ACT and improve it with corrections](03-train-act.md) · [Tutorial index](../README.md#the-tutorial) · Next: [5. Robot loop](05-robot-loop.md)

@@ -14,9 +14,9 @@ may control the robot.
 
 | Process | Portal role | What it does |
 |---|---|---|
-| `uv run robot` | Robot | Publishes joint state and both camera feeds; applies accepted actions |
+| `uv run robot` | Robot | Publishes joint state and three camera feeds; applies accepted actions |
 | `uv run teleoperator` | Operator | Reads both leader arms and lets you switch control |
-| `src/policies/act/inference.py` | Operator | Produces actions from an ACT checkpoint |
+| Dream-1 or ACT inference script | Operator | Produces actions from an ACT checkpoint |
 | `uv run recorder` | Observer | Records streams and episode markers without driving |
 
 <picture>
@@ -28,18 +28,26 @@ The human and policy use the same operator interface. The robot accepts actions
 from one active operator at a time. Pressing `c` in teleop changes that operator;
 you can switch during a take while the recorder continues writing.
 
-## What we’ll build
+## Words used in this tutorial
 
-First, we’ll define the state, action, and camera schema in `portal.yaml`.
-Then we’ll follow an observation from the robot to an operator and an action
-back to the robot. The action carries an observation timestamp so the recorder
-can preserve what the operator was responding to.
+- **Leader:** an arm you move by hand. **Follower:** an arm that executes commands.
+- **Operator:** a process that proposes actions, either from the leaders or a policy.
+- **Policy:** a model that turns observations into actions.
+- **Active operator:** the one operator whose actions the robot accepts.
+- **Take / episode:** one recorded attempt at a task.
+- **Checkpoint:** saved model files produced by training.
 
-Finally, we’ll convert recorded takes to a LeRobot dataset, train ACT, and use
-it as a second operator. Human corrections go into the same archive as policy
-actions, ready for another training run.
+## Your path through the tutorial
 
-The code snippets in these chapters show the relevant parts of the runnable
-files, rather than standalone programs. Chapter 8 has the complete commands.
+1. Set up the rig, move it with the leaders, and record a take.
+2. Optionally run Dream-1 and record your corrections. It needs an API key but no training data.
+3. Train ACT on your recordings, run it, and collect more corrections.
 
-Next: [01. Wire contract](01-wire-contract.md).
+Chapters 1–3 contain the commands. Chapters 4–8 explain the code behind the
+same loop: shared schema, robot, operator, recording, and handoff. Their snippets
+are excerpts from runnable files, not standalone programs. Chapter 9 is the
+configuration and troubleshooting reference.
+
+---
+
+[Tutorial index](../README.md#the-tutorial) · Next: [1. Set up and record your first take](01-first-recording.md)

@@ -11,7 +11,7 @@ from livekit.portal import OperatorConfig
 
 from policies.act.inference import action_dict, build_batch, dataset_fields
 from policies.act.train import find_resume_config, training_args
-from _common import CONFIG_PATH
+from utils.common import CONFIG_PATH
 
 
 class ActTests(unittest.TestCase):

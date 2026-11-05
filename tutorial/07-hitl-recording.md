@@ -1,8 +1,8 @@
-# 5. HITL recording
+# 7. HITL recording
 
 A correction is useful training data only if it is paired with the observation
 that prompted it. The human and policy both send an `in_reply_to_ts_us` anchor:
-the human uses the camera view, while a policy (Dream-1 from chapter 4, or ACT)
+the human uses the camera view, while a policy (Dream-1 from chapter 2, or ACT)
 uses its input observation.
 
 ## Add an observer
@@ -71,4 +71,6 @@ alignment limit without collecting again. The hardware-free tests check
 alignment after an archive round trip; see [test/README.md](../test/README.md),
 including the known Portal 0.3.0rc1 stall regression.
 
-Next: [06. Handoff](06-handoff.md).
+---
+
+Previous: [6. Operator loop](06-operator-loop.md) · [Tutorial index](../README.md#the-tutorial) · Next: [8. Handoff](08-handoff.md)
