@@ -1,94 +1,89 @@
-# 2. A policy to interrupt: Dream-1
+# 2. Run Dream-1 and record corrections
 
-After [your first recording](01-first-recording.md), you can add a policy.
-This chapter is optional: skip to [ACT](03-train-act.md) to train only on human demonstrations.
+Dream-1 runs on Dream Labs' servers and needs no training dataset. Run it on
+your task, correct it with the leaders, and record the corrected attempts for ACT.
+A **take** is one attempt, marked with `r` to begin and `r` to end.
 
-Even before you have collected training data, Dream Labs' Dream-1 can be that policy: a generalist model
-that runs on Dream Labs' servers, reads the three camera views and both arms,
-and follows a task in words. It joins the room as one more operator, so the
-recorder can capture its actions and your corrections in one take.
+Complete [chapter 1](01-first-recording.md) first. Use the same task, camera
+positions, and host configuration.
 
-## Run a dry run
+## 1. Configure access
 
-Save your Dream Labs API key as their
-[Getting started](https://platform.dreamlabs.ai/api-documentation/) describes
-(`~/.dreamlabs/credentials`). With the robot and teleoperator running:
+On the **robot host**, save your Dream Labs API key in `~/.dreamlabs/credentials`
+using the [Dream Labs setup instructions](https://platform.dreamlabs.ai/api-documentation/).
 
-```bash
-uv run --group dream python src/policies/dream-1/inference.py --task "fold the towel" --dry-run
-```
+Keep the robot, recorder, and teleoperator from chapter 1 running. If you stopped
+them, restart them in that order, in separate terminals. Keep other policies stopped.
 
-It joins as `policy-dream-1` and waits. Press `c` in teleop until it holds
-control. In a dry run it prints its targets once a second instead of sending
-them: check that they sit near the arms' pose before you drop `--dry-run`.
-Press `c` again to take control back.
+## 2. Check targets without moving
 
-## Record a correction
-
-Stop the dry run with Ctrl-C. Start the recorder if it is not running, then
-restart the policy with motion enabled:
+In a fourth terminal on the robot host:
 
 ```bash
-uv run --group dream python src/policies/dream-1/inference.py --task "fold the towel"
+uv run dream-1 --task "fold the towel" --dry-run
 ```
 
-Keep only one policy connected while learning the handoff. In teleop:
+1. In teleop, press `c` until `policy-dream-1` is selected.
+2. Check the targets printed by Dream-1. They should be near the current arm poses.
+   Dry-run prints targets but sends no motion commands.
+3. Press `c` to select the human again.
+4. Stop Dream-1 with Ctrl-C. If the targets look wrong, check the camera views
+   and arm readings before enabling motion.
 
-1. Press `c` until the human is selected, then move to the starting pose.
-2. Press `r` to begin a take, then `c` to select `policy-dream-1`.
-3. Keep the leaders near the followers’ poses. When the policy needs help,
-   press `c` to take control and guide the leaders.
-4. Press `c` to let Dream-1 continue, or `r` to finish the take.
-5. Use `[` to discard an open take you would not want ACT to learn from.
+## 3. Run and correct the policy
 
-Check the selected identity after pressing `c`: it cycles through connected
-operators. Recording continues across every handoff. The target ramp limits
-command changes; it does not replace keeping the leaders near the followers.
+In the fourth terminal:
 
-Stop the recorder with Ctrl-C to flush the archive. Follow
-[Convert and inspect](01-first-recording.md#convert-and-inspect) before training.
-Use a new dataset ID if you already converted your first take; conversion does
-not append to an existing dataset directory.
-
-## What the policy does
-
-[`src/policies/dream-1/inference.py`](../src/policies/dream-1/inference.py) is
-the operator loop from chapter 6 with the leader arms replaced by a model call.
-Dream-1 answers hand poses, not Metal joints; the `dream` client converts both
-ways with Dream's own model of the Metal arm, so this example uses that built-in conversion:
-
-```python
-client.policy({
-    "checkpoint": "dreamlabs/dream-1-beta",
-    "embodiment": embodiment(),           # the parts each request and reply carry
-    "ik": {"arm": "metal", "head": "eef"},  # joints -> hand poses -> joints
-})
+```bash
+uv run dream-1 --task "fold the towel"
 ```
 
-Each tick it hands the client the newest observation, in the model's units:
+In teleop:
 
-| Portal | Dream-1 |
-|---|---|
-| `overhead_camera`, `left_wrist_camera`, `right_wrist_camera` | `video.overhead`, `video.wrist_l`, `video.wrist_r`: cropped to 16:9, 320x176 JPEG |
-| `left_joint1..6.pos`, `right_joint1..6.pos` (rad) | `state.left_arm`, `state.right_arm`, unchanged |
-| `left_gripper.pos`, `right_gripper.pos` (mm) | `state.left_grip`, `state.right_grip`: mm / 100 |
+1. Select the human with `c`, then reset the towel and arms.
+2. Press `r` to start a take.
+3. Press `c` and confirm `policy-dream-1` is selected.
+4. Keep the leaders near the followers. When the policy needs help, press `c`,
+   confirm the human is selected, and guide the leaders to correct the motion.
+5. Press `c` to let the policy continue. Repeat step 4 when needed.
+6. Press `r` when the task is complete. To reject an attempt, press `[` before
+   ending the take instead.
 
-A reply is 48 rows per arm. The loop plays them at 20 rows a second, and asks
-for the next chunk on a worker thread before this one runs out
-(`client.refill_due()`), so the arms keep moving while the network works.
+Repeat these steps to collect varied successful takes. A `NOT RECORDED` message
+means the boundary did not reach an observer; fix the recorder connection
+before continuing. One take checks the pipeline but is not enough to expect a
+useful trained policy.
 
-## Keeping it safe
+Recording continues through each handoff. Dream-1 starts a fresh plan when it
+regains control. Target limits reduce command jumps; keep the leaders aligned
+before taking over.
 
-- Every action names the observation it answers, as the human's does.
-- The commanded target moves at most `DREAM_MAX_JOINT_RAD_S` (0.5 rad/s) per
-  joint, so taking control ramps from where the arms are.
-- The robot still ramps and clamps every command ([robot loop](05-robot-loop.md)).
-- No fresh view, or no row due: it sends nothing, and the arms hold.
-- Each handoff to Dream-1 starts a new episode, so it never resumes a plan
-  made before your correction.
+## 4. Convert and inspect
 
-Dream-1 will make mistakes on your task. Keep useful takes and discard failed ones before training ACT.
+Finish the take, select the human, and support the arms. Stop Dream-1 with Ctrl-C,
+quit teleop with `x`, then stop the recorder and robot with Ctrl-C.
+
+The recorder saves `.rrd` archives under `data/sessions`. Keep them so you can
+rebuild the dataset later. On the robot host, check the conversion report:
+
+```bash
+uv run livekit-portal convert data/sessions --output lerobotv3 --dry-run
+```
+
+Confirm it includes completed episodes and usable rows, then create the dataset:
+
+```bash
+uv run livekit-portal convert data/sessions --output lerobotv3 --repo-id local/portal-makermods
+```
+
+The dataset is saved to `data/local/portal-makermods`. Discarded and unfinished
+takes are excluded. Conversion does not append to an existing dataset; use a
+new repo ID for later rounds, as shown in chapter 3.
+
+Continue to **[3. Train ACT](03-train-act.md)**.
+
+For implementation details, see [`src/policies/dream_1/run.py`](../src/policies/dream_1/run.py).
 
 ---
 
-Previous: [1. Set up and record your first take](01-first-recording.md) · [Tutorial index](../README.md#the-tutorial) · Next: [3. Train ACT and improve it with corrections](03-train-act.md)
+Previous: [1. Set up the rig](01-first-recording.md) · [Tutorial index](../README.md#the-tutorial) · Next: [3. Train ACT and improve it with corrections](03-train-act.md)

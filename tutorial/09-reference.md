@@ -1,21 +1,54 @@
 # 9. Configuration and troubleshooting
 
 Use this chapter when changing hosts, tuning settings, or diagnosing a problem.
-For your first run, start with [your first recording](01-first-recording.md).
+For your first run, start with [rig setup](01-first-recording.md).
 
-## Deploy and troubleshoot
+## Human-only demonstrations
+
+If you prefer to train without Dream-1, complete [chapter 1](01-first-recording.md),
+then use the running teleoperator and recorder:
+
+1. Press `c` and confirm the human is selected.
+2. Reset the towel and arms, then press `r` to begin a take.
+3. Demonstrate the task with the leaders.
+4. Press `r` to finish. For a failed attempt, press `[` while the take is open instead.
+5. Repeat steps 2–4 to collect varied successful demonstrations.
+6. Rest or support all arms, press `x` in teleop, and stop the recorder and robot
+   with Ctrl-C. Wait for the recorder to exit.
+7. Follow [chapter 2's conversion steps](02-dream-1.md#4-convert-and-inspect),
+   then continue to [ACT training](03-train-act.md).
+
+## Other host layouts
+
+The walkthrough uses separate robot and teleop hosts. You can run all three
+peers on one Linux machine if it has the required CAN adapters and cameras.
+If leader and follower gripper measurements differ, give robot and teleop
+separate working directories with their own `.env.local` values. Start each
+process from its directory; relative output paths follow that directory.
+
+You can also run the recorder or policy on another machine. Copy the repository,
+run `uv sync`, and configure the same LiveKit server, room, and `portal.yaml`.
+ACT needs its checkpoint and training dataset metadata on its inference host.
+
+### Deploy to another host
 
 ```bash
 ./scripts/deploy_to_robot.sh robotuser@robot.local '~/workspace/portal-makermods'
 ```
 
-The script syncs source, `.env`, and `.env.local`, replacing the robot’s copies;
-datasets, checkpoints, and training outputs are excluded. Run `uv sync` on the destination afterwards.
+Replace the host and destination path. This replaces source, `.env`, and
+`.env.local` on the destination; datasets and training outputs are excluded.
+Run `uv sync` there afterwards and check its hardware settings.
 
-The processes report throughput, clock synchronization, and recording counts.
-For hardware faults, missing hotkeys, or the known timestamp regression after
-stalls in Portal 0.3.0rc1, see [Troubleshooting](#troubleshooting).
+## Training alternatives
 
+- **Hosted dataset:** add `--push` to conversion with your Hugging Face repo ID.
+  For training, set `DATASET_REPO_ID` to that ID and omit `DATASET_ROOT`.
+- **Cloud training:** adapt the resources and storage in
+  [`skypilot.yaml`](../src/policies/act/skypilot.yaml), then launch it with
+  `sky launch src/policies/act/skypilot.yaml -e DATASET_REPO_ID=you/your-dataset`.
+- **Replace a converted dataset:** conversion supports `--overwrite`. Prefer a
+  new repo ID for each round so earlier datasets remain available.
 
 ## Configuration
 
@@ -40,10 +73,11 @@ shell values. Relative output paths use the working directory.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `METAL_URDF` | `~/metal-python-ros/metal_sdk/example/urdf/metal_with_gripper.urdf` | the SDK's arm model |
+| `METAL_GRIPPER_CLOSED_DEG`, `METAL_GRIPPER_OPEN_DEG` | — (required) | gripper motor angle, jaws closed / open; measure per arm. Per-side: `METAL_{LEFT,RIGHT}_GRIPPER_*_DEG` |
+| `METAL_GRIPPER_HOLD_NM` | `0.5` | the gripper's holding torque on an object, N.m |
 | `METAL_FOLLOWER_RIGHT_CAN`, `METAL_FOLLOWER_LEFT_CAN` | `can1`, `can3` | robot host |
 | `METAL_LEADER_RIGHT_CAN`, `METAL_LEADER_LEFT_CAN` | `can0`, `can2` | teleop host |
-| `METAL_CAM_OVERHEAD`, `METAL_CAM_LEFT_WRIST`, `METAL_CAM_RIGHT_WRIST` | `/dev/video0`, `/dev/video2`, `/dev/video4` | Linux: `/dev/videoN`. macOS: an integer index. |
+| `METAL_CAM_OVERHEAD`, `METAL_CAM_LEFT_WRIST`, `METAL_CAM_RIGHT_WRIST` | `/dev/video0`, `/dev/video2`, `/dev/video4` | Linux camera device path. |
 | `METAL_CAM_WIDTH` / `_HEIGHT` | `640` / `480` | a 16:9 mode such as 1280x720 suits Dream-1 better; it center-crops otherwise |
 | `METAL_MAX_STEP_RAD` | `0.087` | maximum joint target step per command (about 5°); `0` disables the limit |
 
@@ -51,7 +85,7 @@ shell values. Relative output paths use the working directory.
 about 2.6 rad/s). Use a lower value for bring-up. Grippers are not ramped. The arm joints run impedance
 control: ramping the target preserves torque, while a small tracking-error
 clamp can prevent motion. Every command is also clamped to MakerMods' soft
-limits, and the grippers to their 0–80 mm stroke.
+limits, and the gripper commands to the driver's normalized opening range.
 
 ### Dream-1
 
@@ -90,17 +124,16 @@ CUDA/MPS/CPU automatically, and waits for the `c` handoff before producing actio
 - **No observations in ACT:** every declared camera must publish; the checkpoint
   must use cameras available in `portal.yaml`.
 - **Arm errors:** the robot's 5 s line names the arm. Check its CAN link
-  (`ip link`), adapter, and power, then restart the robot. `metal_sdk is not installed`: see
-  [The Metal SDK](01-first-recording.md#the-metal-sdk-robot-and-teleop-hosts).
-- **Dream-1 refuses or stalls:** a `DreamAuthError` means the key in
+  (`ip link`), adapter, and power, then restart the robot. `dreamlabs is not
+  installed`: run `uv sync`. An arm that refuses to open for its gripper needs
+  `METAL_GRIPPER_{CLOSED,OPEN}_DEG` set; see
+  [hardware setup](01-first-recording.md#1-prepare-the-hardware).
+- **Dream-1 refuses or stalls:** for `DreamAuthError`, check the key in
   `~/.dreamlabs/credentials`; `pool_warming` means the model is starting. It
   sends nothing until all three cameras publish.
 - **Low frame rate:** compare device and tick times in robot diagnostics. Lower
   the requested rate or camera resolution if the hardware cannot keep up.
 - **Archive writer drops:** lower JPEG quality or resolution. Check disk capacity.
-- **Wrong pairing just after a stall:** Portal 0.3.0rc1 has a known video timestamp
-  regression when ticks arrive very close together. The `stalls` degradation test
-  can detect it; the test README records the limitation.
 
 ---
 

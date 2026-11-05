@@ -1,64 +1,49 @@
-# Human-in-the-loop with LiveKit Portal and MakerMods Metal arms
+# Human-in-the-loop with Portal and MakerMods Metal arms
 
-This tutorial builds a human-in-the-loop (HITL) training pipeline with
-[LiveKit Portal](https://github.com/livekit/portal) and a pair of MakerMods Metal arms.
-Let a policy attempt a task, take over with the leader arms when it needs help,
-and record the correction. Use those recordings to train a policy, then repeat.
+Run Dream-1, take over with the leader arms when it needs help, and record the
+corrected attempts. Train ACT on those recordings, then repeat the correction loop.
 
-Two Metal leaders control two Metal followers over a LiveKit room, with an
-overhead and two wrist cameras. A recorder writes everything to a Rerun archive
-that Portal converts into a LeRobot dataset for training ACT. To have a policy
-to correct from day one, start with Dream Labs' Dream-1, which needs no data;
-its corrected takes can then train ACT, distilling Dream-1 into a small local
-policy.
+## The tutorial
+
+Follow these chapters in order:
+
+1. **[Set up the rig](tutorial/01-first-recording.md)** and check human control.
+2. **[Run Dream-1 and record corrections](tutorial/02-dream-1.md)**.
+3. **[Train ACT](tutorial/03-train-act.md)** on the corrected takes.
+
+To collect human-only demonstrations instead, see the
+[alternative recording path](tutorial/09-reference.md#human-only-demonstrations).
+
+You need two Metal leaders, two Metal followers, three USB cameras, Linux hardware
+hosts, Python 3.12, `uv`, and a LiveKit server. ACT training also needs a CUDA
+machine. Dream-1 needs a Dream Labs API key.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="tutorial/images/hitl-loop-dark.svg">
   <img alt="Start with Dream-1 zero-shot and correct it, or collect teleop demos. Convert the archives to a LeRobot dataset and train ACT on them, distilling Dream-1 into a small local policy. Run ACT while you correct it; corrections feed the next training run." src="tutorial/images/hitl-loop-light.svg" width="100%">
 </picture>
 
-## The tutorial
-
-Start with **[01. Your first recording](tutorial/01-first-recording.md)** if you
-have the hardware ready. Read chapter 00 first for the vocabulary and overview.
-The first three hands-on chapters take you from a demonstration to a policy you
-can correct; the remaining chapters explain the code and settings.
-
-| Chapter | What you’ll do or learn |
+| Chapter | Purpose |
 |---|---|
-| [00. What is Portal?](tutorial/00-what-is-portal.md) | Meet the robot, operator, policy, and recorder |
-| [01. Your first recording](tutorial/01-first-recording.md) | Set up the rig, record a take, and convert it to a dataset |
-| [02. Try Dream-1 (optional)](tutorial/02-dream-1.md) | Run a policy without training data and record corrections |
-| [03. Train ACT](tutorial/03-train-act.md) | Train on your takes, run ACT, and improve it with corrections |
-| [04. Shared schema](tutorial/04-wire-contract.md) | Understand the camera, state, and action contract |
-| [05. Robot loop](tutorial/05-robot-loop.md) | Follow observations out and accepted actions back in |
-| [06. Operator loop](tutorial/06-operator-loop.md) | Read the leaders, display video, and timestamp actions |
-| [07. Recording](tutorial/07-hitl-recording.md) | Understand takes, action timestamps, and dataset alignment |
-| [08. Handoff](tutorial/08-handoff.md) | See how control switches without ending a take |
-| [09. Configuration and troubleshooting](tutorial/09-reference.md) | Look up settings, deployment steps, and fixes |
+| [00. Overview](tutorial/00-what-is-portal.md) | Roles and vocabulary |
+| [01. Setup](tutorial/01-first-recording.md) | Connect the rig and check human control |
+| [02. Dream-1](tutorial/02-dream-1.md) | Run, correct, record, and convert |
+| [03. ACT](tutorial/03-train-act.md) | Train, run, correct, and retrain |
 
-For a first run, you need the Metal arms and cameras, a LiveKit server, Python
-3.12, and `uv`. Chapter 1 walks through the SDK and host setup. A Dream Labs API
-key is only needed for Dream-1; a CUDA training machine is only needed for ACT.
-You can also run the [hardware-free checks](test/README.md).
+Read these after completing the walkthrough, or when you need to change the code:
 
-The Metal arms have no brakes and this project never switches their motors
-off: rest or support the arms before stopping the robot or teleop.
+| Chapter | Purpose |
+|---|---|
+| [04. Shared schema](tutorial/04-wire-contract.md) | Cameras, state, and actions |
+| [05. Robot loop](tutorial/05-robot-loop.md) | Publish observations and apply actions |
+| [06. Operator loop](tutorial/06-operator-loop.md) | Send human actions and mark takes |
+| [07. Recording](tutorial/07-hitl-recording.md) | Align actions with observations |
+| [08. Handoff](tutorial/08-handoff.md) | Switch between human and policy |
+| [09. Reference](tutorial/09-reference.md) | Settings, alternatives, and troubleshooting |
 
-## Layout
+**Metal arms have no brakes.** Rest or support them before stopping the robot
+or teleoperator. This project never disables the motors on stop or fault.
 
-```text
-portal.yaml             # shared camera, state, and action schema
-src/
-  robot.py              # publish observations and apply actions
-  teleoperator.py       # leader arms, handoff, and episode markers
-  recorder.py           # observer writing session archives
-  utils/common.py       # environment, tokens, and pacing
-  utils/metal.py        # the Metal arms and cameras
-  utils/                # hotkeys, preview, task prompts
-  policies/dream-1/     # Dream-1 as a Portal operator
-  policies/act/         # train.py, inference.py, skypilot.yaml
-tutorial/               # the HITL walkthrough
-scripts/                # deployment helper
-test/                   # hardware-free checks
-```
+The runnable peers are in `src/`; policies are in `src/policies/`.
+All peers share [`portal.yaml`](portal.yaml).
+For checks without hardware, see [test/README.md](test/README.md).

@@ -4,7 +4,7 @@ Open [`src/teleoperator.py`](../src/teleoperator.py).
 The human operator receives video, reads both leader arms, and sends one action
 per tick. It also controls handoff and marks episode boundaries.
 
-## Show the incoming video
+## 1. Receive camera frames
 
 Each declared track registers an `on_video_frame` callback. The callback updates
 `View` with the frame timestamp and passes decoded RGB pixels to `Preview`:
@@ -14,10 +14,9 @@ view.saw(name, frame)
 preview.show(name, frame_bytes_to_numpy_rgb(frame.data, frame.width, frame.height))
 ```
 
-The preview keeps the latest image per camera. Session history belongs to the
-recorder, so the display does not accumulate a second archive.
+The preview keeps the latest image per camera.
 
-## Send an anchored action
+## 2. Send an anchored action
 
 ```python
 if action := await hardware.run(leaders.get_action):
@@ -38,18 +37,19 @@ timestamp instead could select state that arrived before its matching video.
 Portal separately stamps when the action was sent using its robot-synchronized
 clock.
 
-## Claim control explicitly
+## 3. Select the active operator
 
 Press `c` to claim control. Press it again to cycle to another connected
 operator, such as `policy-act`. With only teleop connected, `c` selects teleop.
 There is no background loop that reclaims the gate after you hand it away.
 
-The leaders keep publishing while the policy drives, but the robot rejects
-its actions until the human is active again. Chapter 8 follows this handoff.
+The leaders keep publishing while the policy drives, but the robot accepts
+human actions only while the human is selected.
 
-## Mark a take
+## 4. Mark a take
 
-At startup, enter up to nine task descriptions. The hotkeys are:
+The walkthrough sets one task through `PORTAL_DATA_TASKS`. Without that setting,
+teleop prompts for task descriptions at startup. The hotkeys are:
 
 | Key | Action |
 |---|---|

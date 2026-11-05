@@ -1,138 +1,147 @@
-# 1. Set up and record your first take
+# 1. Set up the rig
 
-By the end of this chapter, you will have one recorded demonstration and a
-LeRobot dataset. You do not need a policy, a Dream Labs key, or a training GPU yet.
+You will connect the arms and cameras and check human control before running
+Dream-1. Run all commands from the repository root.
 
-A **take** is one attempt at a task, marked with `r` to begin and `r` to end.
-The recorder saves a session archive (`.rrd`); conversion extracts finished
-takes as training episodes. Run every command below from the repository root.
+Use two Linux hosts for this walkthrough: a **robot host** for the followers,
+cameras, and recorder, and a **teleop host** for the leaders. Keep the same
+repository version and `portal.yaml` on both. Other layouts are covered in the
+[reference](09-reference.md#other-host-layouts).
 
-## 1. Prepare the hosts
+## 1. Prepare the hardware
 
-You need two MakerMods Metal followers, two Metal leaders, three USB cameras
-(overhead, left wrist, right wrist), a LiveKit server, Python 3.12, and `uv`.
-Run the robot on the followers' host, teleop on the leaders' host (the same
-machine works), and the recorder wherever you have disk space. Policies can run
-on any machine in the same room.
+1. Mount two Metal followers, two Metal leaders, and three USB cameras:
+   overhead, left wrist, and right wrist. Left and right are from the robot's view.
+2. Connect one CAN adapter per arm. Use these interface names:
 
-From the repository root on each host:
+   | Host | Right arm | Left arm |
+   |---|---|---|
+   | Robot | `can1` | `can3` |
+   | Teleop | `can0` | `can2` |
+
+3. Support the arms before powering them. Leaders are read-only and must be
+   supported by hand; followers hold their pose under power. The arms have no brakes.
+4. Use the vendor setup tools to check joint zeros and measure each gripper's
+   motor angle with its jaws fully closed and fully open. Keep these four
+   measurements for each host. Do not substitute example angles.
+
+You need Python 3.12 and `uv` installed on both hosts, and a LiveKit server
+reachable from both. Have its URL, API key, and API secret ready.
+
+## 2. Install and configure both hosts
+
+On **each host**, run the following. If `.env` already exists, skip the copy
+and edit the existing file.
 
 ```bash
-cp .env.example .env
 uv sync
+cp .env.example .env
 ```
 
-Fill in the LiveKit credentials and room. Keep `portal.yaml` identical on all
-hosts. Values in `.env.local` override `.env`; the deploy script copies both.
+Set the following values in `.env`, using the same server credentials and room
+on both hosts:
 
-### The Metal SDK (robot and teleop hosts)
+```dotenv
+LIVEKIT_URL=wss://YOUR_LIVEKIT_HOST
+LIVEKIT_API_KEY=YOUR_API_KEY
+LIVEKIT_API_SECRET=YOUR_API_SECRET
+LIVEKIT_ROOM=portal-makermods
+PORTAL_DATA_TASKS=fold the towel
+PORTAL_HOTKEYS_GLOBAL=0
+METAL_MAX_STEP_RAD=0.02
+```
 
-The arms are driven by MakerMods' `metal_sdk`, from
-[metal-python-ros](https://github.com/makermods-robotics/metal-python-ros). It
-targets Ubuntu 22.04 with ROS 2 Humble, because the native library links ROS's
-KDL. Follow that repository's README to install its dependencies, set up the CAN
-adapters, and build the native library (`bash metal_sdk/build_metal_sdk.sh`). That
-script installs the binding into the system Python 3.10, so install it into
-this project's environment as well:
+Replace the three `YOUR_...` values. This walkthrough uses **fold the towel**
+as the task and terminal hotkeys. Keep the teleop terminal focused when pressing keys.
+
+Add these settings to each host's `.env`, replacing every placeholder with the
+measurements for the arms attached to that host:
+
+```dotenv
+METAL_LEFT_GRIPPER_CLOSED_DEG=MEASURED_VALUE
+METAL_LEFT_GRIPPER_OPEN_DEG=MEASURED_VALUE
+METAL_RIGHT_GRIPPER_CLOSED_DEG=MEASURED_VALUE
+METAL_RIGHT_GRIPPER_OPEN_DEG=MEASURED_VALUE
+```
+
+Check for an existing `.env.local`: its values override `.env`.
+Confirm the driver imports on both hosts:
 
 ```bash
-git clone https://github.com/makermods-robotics/metal-python-ros ~/metal-python-ros
-# ... the repo's dependency and build steps ...
-uv pip install ~/metal-python-ros/metal_sdk/binding
-uv run python -c "from metal_sdk import MetalSDKInterface; print('ok')"
+uv run python -c "from robots import metal, motor_arm, robstride; print('ok')"
 ```
 
-The build script must have run first: it copies the native library into the
-package the binding installs.
-Rerun the install after every `uv sync`, which removes packages the lockfile
-does not list. `METAL_URDF` defaults to that clone's
-`metal_sdk/example/urdf/metal_with_gripper.urdf`.
+## 3. Enable CAN and check cameras
 
-### CAN links and cameras
-
-The defaults follow the vendor's two-pair layout
-(`metal_controller/config/two_master_slave.yaml`): right leader `can0`, right
-follower `can1`, left leader `can2`, left follower `can3`. Bring them up with the
-repo's `metal_ros2/can_scripts/start_canN.sh`, and set
-`METAL_{FOLLOWER,LEADER}_{LEFT,RIGHT}_CAN` if yours differ. Left and right are
-as the robot sees them, standing behind the arms facing the workspace.
-
-Cameras default to `/dev/video0` (overhead), `/dev/video2` (left wrist), and
-`/dev/video4` (right wrist); set `METAL_CAM_OVERHEAD`, `METAL_CAM_LEFT_WRIST`, or
-`METAL_CAM_RIGHT_WRIST` if yours differ. Use `v4l2-ctl --list-devices` to find
-them.
-
-There is no calibration step in this project: the Metal motors store their own
-zero. If a joint reads wrong, re-zero it with the vendor's tools.
-
-### Before power-on
-
-The leaders float in gravity compensation and the followers hold their pose
-under power. Nothing in this project switches the motors off, because a Metal
-arm has no brakes and drops when disabled. Rest or support the arms before you
-stop `uv run robot` or `uv run teleoperator`, and keep a hand on the power
-switch. For the first run, lower `METAL_MAX_STEP_RAD` (for example `0.02`).
-
-## 2. Record a demonstration
-
-Run these in separate terminals, on the appropriate hosts. Start the robot
-first: the recorder and operators wait for its clock when they connect, and give
-up after 10 s without it.
+On the **robot host**:
 
 ```bash
-# Terminal 1 — follower and camera host
-uv run robot
-
-# Terminal 2 — recording host
-uv run recorder
-
-# Terminal 3 — leader host
-uv run teleoperator
+sudo ip link set can1 up type can bitrate 1000000
+sudo ip link set can3 up type can bitrate 1000000
+v4l2-ctl --list-devices
 ```
 
-Enter the task description when teleop starts. Wait for live video and the
-recorder’s output path, then:
+In its `.env`, set the camera paths to the devices listed for each view:
 
-```text
-c       select the human operator
-        move to the starting pose
-r       begin a take
-        demonstrate the task
-r       end the take
-        repeat, or use [ to discard a bad take
-x       quit teleop
+```dotenv
+METAL_CAM_OVERHEAD=/dev/video0
+METAL_CAM_LEFT_WRIST=/dev/video2
+METAL_CAM_RIGHT_WRIST=/dev/video4
 ```
 
-Use `1`–`9` to switch tasks between takes. Stop the recorder with Ctrl-C after
-collection so it flushes the archive. Files are written under `data/sessions`
-unless `PORTAL_DATA_RRD_DIR` overrides it.
-
-Global hotkeys require desktop permissions. If they do not respond, focus the
-teleop terminal and press them there. `NOT RECORDED` means a boundary did not
-reach an observer.
-
-Before continuing, check that all three camera views are live, `c` lets the
-leaders move the followers, and the recorder has written a `.rrd` file. Finish
-the take with `r` before quitting; `x` discards an open take. Rest or support
-the arms before stopping the robot or teleoperator.
-
-## Convert and inspect
+On the **teleop host**:
 
 ```bash
-uv run livekit-portal convert data/sessions --output lerobotv3 --dry-run
-uv run livekit-portal convert data/sessions --output lerobotv3 --repo-id local/portal-makermods
+sudo ip link set can0 up type can bitrate 1000000
+sudo ip link set can2 up type can bitrate 1000000
 ```
 
-The dataset is written under `data/local/portal-makermods` by default. Discarded and
-unclosed takes are excluded. Keep the original `.rrd` files so you can inspect
-them in Rerun or change conversion settings later.
+If your CAN names differ, use your actual names in the commands and set the
+[CAN variables](09-reference.md#hardware) in `.env` to match.
 
-For a dataset hosted on Hugging Face, use your repo ID and add `--push`.
+## 4. Start the three processes
 
-You now have the inputs for training: the original session archive and the
-converted dataset. Check the conversion report for included episodes and rows.
-If it contains no usable data, fix recording before starting a training job.
+Leave each command running in its own terminal. Start them in this order:
+
+1. **Robot host, terminal 1:**
+
+   ```bash
+   uv run robot
+   ```
+
+2. Once the robot has connected, **robot host, terminal 2:**
+
+   ```bash
+   uv run recorder
+   ```
+
+3. **Teleop host, terminal 3:**
+
+   ```bash
+   uv run teleoperator
+   ```
+
+Wait for all three camera views and the recorder's output path before continuing.
+The robot must connect first because the other processes wait for its clock.
+
+## 5. Check human control
+
+In the teleop terminal:
+
+1. Hold the leaders near the followers' current poses.
+2. Press `c` and confirm the human operator is selected.
+3. Move the leaders gently and check that both followers track them.
+4. Place the towel in the workspace and move the arms to the starting pose.
+
+Leave all three processes running and continue to
+**[2. Run Dream-1 and record corrections](02-dream-1.md)**.
+
+If you need to stop here, rest or support all arms, press `x` in teleop,
+then stop the recorder and robot with Ctrl-C. Wait for the recorder to exit.
+
+To record without a policy, follow the
+[human-only alternative](09-reference.md#human-only-demonstrations).
 
 ---
 
-Previous: [0. What is Portal?](00-what-is-portal.md) · [Tutorial index](../README.md#the-tutorial) · Next: [2. A policy to interrupt: Dream-1](02-dream-1.md)
+Previous: [0. What is Portal?](00-what-is-portal.md) · [Tutorial index](../README.md#the-tutorial) · Next: [2. Run Dream-1 and record corrections](02-dream-1.md)

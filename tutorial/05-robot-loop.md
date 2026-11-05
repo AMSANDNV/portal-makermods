@@ -1,22 +1,21 @@
 # 5. Robot loop
 
 Open [`src/robot.py`](../src/robot.py).
-The loop reads both Metal followers and the three cameras, publishes
-observations, and applies the latest accepted action. Hardware setup and
-recovery live in `src/utils/metal.py`, over MakerMods' `metal_sdk`: each arm is
-one `MetalSDKInterface` on its own CAN link, in real-time joint-position mode.
+The loop publishes both followers' state and three camera feeds, then applies
+the latest accepted action. Hardware calls live in
+[`src/utils/metal.py`](../src/utils/metal.py).
 
-## Receive an action
+## 1. Receive an action
 
 Portal calls `on_action` for actions that pass the active-operator gate.
 The callback saves their values; the hardware loop applies the latest values
 on its next tick. This avoids issuing a motor transaction for every packet
 when actions arrive in a burst.
 
-The robot does not need to know whether an action came from a human or ACT.
-Both use the same schema and gate.
+The robot does not need to know whether an action came from a human or a policy.
+All operators use the same schema and gate.
 
-## Publish one tick
+## 2. Publish observations and apply the action
 
 The main loop contains this sequence:
 
@@ -38,10 +37,9 @@ observation and lets the recorder align responses later. Frames are RGB
 `uint8` arrays with shape `(height, width, 3)`.
 
 `HardwareThread` serializes device calls while leaving the asyncio loop free
-for network callbacks. `pace(fps)` also yields when a tick overruns its budget;
-otherwise an overloaded hardware loop could starve the network.
+for network callbacks. Device calls finish before hardware disconnects.
 
-## Handle a handoff
+## 3. Handle handoffs and faults
 
 The robot starts with no active operator. On a gate change it clears its cached
 action, so the previous operator’s command is not reused while waiting for the
@@ -59,8 +57,7 @@ serves the last good frame.
 
 Nothing in this project disables the motors, on stop or on fault: a Metal arm
 has no brakes and drops when disabled. Rest or support the arms before you stop
-the robot. These hardware details stay in `src/utils/metal.py` so the Portal
-loop remains readable.
+the robot.
 
 ---
 

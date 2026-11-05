@@ -16,7 +16,7 @@ may control the robot.
 |---|---|---|
 | `uv run robot` | Robot | Publishes joint state and three camera feeds; applies accepted actions |
 | `uv run teleoperator` | Operator | Reads both leader arms and lets you switch control |
-| Dream-1 or ACT inference script | Operator | Produces actions from an ACT checkpoint |
+| `uv run dream-1` or `uv run act` | Operator | Produces actions from observations |
 | `uv run recorder` | Observer | Records streams and episode markers without driving |
 
 <picture>
@@ -37,17 +37,15 @@ you can switch during a take while the recorder continues writing.
 - **Take / episode:** one recorded attempt at a task.
 - **Checkpoint:** saved model files produced by training.
 
-## Your path through the tutorial
+## Start here
 
-1. Set up the rig, move it with the leaders, and record a take.
-2. Optionally run Dream-1 and record your corrections. It needs an API key but no training data.
-3. Train ACT on your recordings, run it, and collect more corrections.
+1. [Set up the rig and check human control](01-first-recording.md).
+2. [Run Dream-1 and record your corrections](02-dream-1.md).
+3. [Train ACT on the corrected takes](03-train-act.md), then collect more corrections.
 
-Chapters 1–3 contain the commands. Chapters 4–8 explain the code behind the
-same loop: shared schema, robot, operator, recording, and handoff. Their snippets
-are excerpts from runnable files, not standalone programs. Chapter 9 is the
-configuration and troubleshooting reference.
+Human-only demonstrations are an [alternative](09-reference.md#human-only-demonstrations).
+Chapters 4–8 explain the code; chapter 9 is the settings reference.
 
 ---
 
-[Tutorial index](../README.md#the-tutorial) · Next: [1. Set up and record your first take](01-first-recording.md)
+[Tutorial index](../README.md#the-tutorial) · Next: [1. Set up the rig](01-first-recording.md)
