@@ -12,13 +12,10 @@ repository version and `portal.yaml` on both. Other layouts are covered in the
 
 1. Mount two Metal followers, two Metal leaders, and three USB cameras:
    overhead, left wrist, and right wrist. Left and right are from the robot's view.
-2. Connect one CAN adapter per arm. Use these interface names:
-
-   | Host | Right arm | Left arm |
-   |---|---|---|
-   | Robot | `can1` | `can3` |
-   | Teleop | `can0` | `can2` |
-
+2. Connect one USB-CAN adapter per arm. This walkthrough uses SLCAN serial
+   adapters, which Dream's driver opens directly at 1 Mbps. No manual CAN startup
+   is needed. For adapters already exposed as `can0`, see the
+   [SocketCAN alternative](09-reference.md#socketcan-alternative).
 3. Support the arms before powering them. Leaders are read-only and must be
    supported by hand; followers hold their pose under power. The arms have no brakes.
 4. Use the vendor setup tools to check joint zeros and measure each gripper's
@@ -71,17 +68,59 @@ Confirm the driver imports on both hosts:
 uv run python -c "from robots import metal, motor_arm, robstride; print('ok')"
 ```
 
-## 3. Enable CAN and check cameras
+## 3. Identify the arm adapters and cameras
 
-On the **robot host**:
+On **each host**, identify its two adapters before starting any robot software:
+
+1. With the arms powered off and supported, connect only the **right arm's USB
+   adapter** to the host.
+2. List its stable serial path:
+
+   ```bash
+   ls -l /dev/serial/by-id/
+   ```
+
+3. Copy the full `/dev/serial/by-id/...` path for that adapter.
+4. Connect the **left arm's USB adapter**, run the command again, and copy the
+   newly added path. Keep both adapters connected. Each arm must have a distinct path.
+5. Set the two paths in that host's `.env`, replacing the example names below.
+
+**Robot host:**
+
+```dotenv
+METAL_FOLLOWER_RIGHT_CAN=/dev/serial/by-id/RIGHT_ADAPTER_ID
+METAL_FOLLOWER_LEFT_CAN=/dev/serial/by-id/LEFT_ADAPTER_ID
+```
+
+**Teleop host:**
+
+```dotenv
+METAL_LEADER_RIGHT_CAN=/dev/serial/by-id/RIGHT_ADAPTER_ID
+METAL_LEADER_LEFT_CAN=/dev/serial/by-id/LEFT_ADAPTER_ID
+```
+
+Use the stable paths rather than `/dev/ttyACM0`, whose number can change after
+reconnecting. If no unique paths appear, see [serial adapter setup](09-reference.md#serial-adapter-setup).
+
+On Ubuntu, grant your user serial access once on each host:
 
 ```bash
-sudo ip link set can1 up type can bitrate 1000000
-sudo ip link set can3 up type can bitrate 1000000
+sudo usermod -aG dialout "$USER"
+```
+
+Log out and back in for the group change to apply. Dream's driver handles the
+serial connection and bitrate when the Portal peers start. Leave vendor control
+programs and `dreamcli robot up` stopped; Portal runs the control loop here.
+If a vendor `slcand` service already owns the adapter, follow the
+[existing-adapter instructions](09-reference.md#serial-adapter-setup).
+
+On the **robot host**, list cameras:
+
+```bash
 v4l2-ctl --list-devices
 ```
 
-In its `.env`, set the camera paths to the devices listed for each view:
+Set its `.env` camera paths to the devices listed for each view:
 
 ```dotenv
 METAL_CAM_OVERHEAD=/dev/video0
@@ -89,15 +128,7 @@ METAL_CAM_LEFT_WRIST=/dev/video2
 METAL_CAM_RIGHT_WRIST=/dev/video4
 ```
 
-On the **teleop host**:
-
-```bash
-sudo ip link set can0 up type can bitrate 1000000
-sudo ip link set can2 up type can bitrate 1000000
-```
-
-If your CAN names differ, use your actual names in the commands and set the
-[CAN variables](09-reference.md#hardware) in `.env` to match.
+Support the arms and power them on before continuing.
 
 ## 4. Start the three processes
 

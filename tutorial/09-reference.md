@@ -40,6 +40,49 @@ Replace the host and destination path. This replaces source, `.env`, and
 `.env.local` on the destination; datasets and training outputs are excluded.
 Run `uv sync` there afterwards and check its hardware settings.
 
+## Serial adapter setup
+
+The default walkthrough uses SLCAN USB adapters directly. Dream's installed
+`robots.robstride.open_can_bus()` opens `/dev/...` paths with python-can's
+SLCAN backend at 1 Mbps. It also resolves symlinks when checking whether an
+existing `slcand` process owns the device.
+
+- **No unique `/dev/serial/by-id/` entries:** identify adapters one at a time
+  with `ls -l /dev/serial/by-path/` and use those paths instead. Keep each adapter
+  in the same physical USB port.
+- **Permission denied:** on Ubuntu, add your user to `dialout` as shown in
+  chapter 1, then log out and back in.
+- **An existing `slcand` owns the adapter:** Dream uses that daemon's CAN link
+  if it is already up. You can keep this working setup. To switch to direct
+  serial access, stop robot software, support the arms, and stop the specific
+  vendor service that owns the adapter before starting Portal.
+- **Only `canN` devices appear:** use the SocketCAN alternative below.
+
+## SocketCAN alternative
+
+Existing rigs can keep their configured `canN` interfaces. Set each
+`METAL_{FOLLOWER,LEADER}_{LEFT,RIGHT}_CAN` to the interface for that arm.
+Dream expects these links to be up at 1 Mbps before Portal starts.
+
+For **native SocketCAN** adapters, bring up each interface that is down
+(replace `can0` with its actual name):
+
+```bash
+sudo ip link set can0 up type can bitrate 1000000
+```
+
+For **serial adapters managed by MakerMods' SDK**, use its adapter setup and
+startup scripts instead. Its `start_can0.sh` creates a CAN link with `slcand`,
+then brings it up; the command above does not replace that process. Follow
+[MakerMods' CAN setup](https://github.com/makermods-robotics/metal-python-ros#can-setup)
+after rebooting or reconnecting the adapter. Skip startup if your service
+already brings the link up.
+
+[Dream's quickstart](https://github.com/dreamlabs-co/dreamlabs#quick-guide)
+also offers `dreamcli setup` and `dreamcli robot up` for its complete control
+loop. This tutorial uses Dream's driver and model client inside Portal's loop,
+so do not run that robot process alongside the Portal peers.
+
 ## Training alternatives
 
 - **Hosted dataset:** add `--push` to conversion with your Hugging Face repo ID.
@@ -75,8 +118,8 @@ shell values. Relative output paths use the working directory.
 |---|---|---|
 | `METAL_GRIPPER_CLOSED_DEG`, `METAL_GRIPPER_OPEN_DEG` | — (required) | gripper motor angle, jaws closed / open; measure per arm. Per-side: `METAL_{LEFT,RIGHT}_GRIPPER_*_DEG` |
 | `METAL_GRIPPER_HOLD_NM` | `0.5` | the gripper's holding torque on an object, N.m |
-| `METAL_FOLLOWER_RIGHT_CAN`, `METAL_FOLLOWER_LEFT_CAN` | `can1`, `can3` | robot host |
-| `METAL_LEADER_RIGHT_CAN`, `METAL_LEADER_LEFT_CAN` | `can0`, `can2` | teleop host |
+| `METAL_FOLLOWER_RIGHT_CAN`, `METAL_FOLLOWER_LEFT_CAN` | `can1`, `can3` (legacy fallback) | Set robot-host serial paths for the walkthrough |
+| `METAL_LEADER_RIGHT_CAN`, `METAL_LEADER_LEFT_CAN` | `can0`, `can2` (legacy fallback) | Set teleop-host serial paths for the walkthrough |
 | `METAL_CAM_OVERHEAD`, `METAL_CAM_LEFT_WRIST`, `METAL_CAM_RIGHT_WRIST` | `/dev/video0`, `/dev/video2`, `/dev/video4` | Linux camera device path. |
 | `METAL_CAM_WIDTH` / `_HEIGHT` | `640` / `480` | a 16:9 mode such as 1280x720 suits Dream-1 better; it center-crops otherwise |
 | `METAL_MAX_STEP_RAD` | `0.087` | maximum joint target step per command (about 5°); `0` disables the limit |
@@ -123,8 +166,9 @@ CUDA/MPS/CPU automatically, and waits for the `c` handoff before producing actio
   Accessibility permission for the terminal on macOS. Relaunch after granting it.
 - **No observations in ACT:** every declared camera must publish; the checkpoint
   must use cameras available in `portal.yaml`.
-- **Arm errors:** the robot's 5 s line names the arm. Check its CAN link
-  (`ip link`), adapter, and power, then restart the robot. `dreamlabs is not
+- **Arm errors:** the robot's 5 s line names the arm. Check its configured adapter
+  path, serial permissions, and power, then restart the robot. For SocketCAN,
+  also check the link with `ip link`. `dreamlabs is not
   installed`: run `uv sync`. An arm that refuses to open for its gripper needs
   `METAL_GRIPPER_{CLOSED,OPEN}_DEG` set; see
   [hardware setup](01-first-recording.md#1-prepare-the-hardware).
