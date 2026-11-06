@@ -199,6 +199,31 @@ def main() -> int:
     fake_connect(p.arms["right"], None, fails=True)
     c.check(raises(p._open_arms, True) and left.off,
             "one arm fails to open: the one already energized is switched off where it opened")
+
+    from robot import ParkRequests
+    from utils.common import PARK_ONLY, PARK_TOGGLE
+    arms = SimpleNamespace(parked=False)
+    q = ParkRequests(arms)
+    c.check(q.ask("voice", PARK_ONLY) == "parking the arms" and q.take() == ("voice", PARK_ONLY),
+            "a spoken park on powered arms parks them")
+    q.finished()
+    arms.parked = True
+    c.check(q.ask("voice", PARK_ONLY) == "already parked" and q.take() is None,
+            "a spoken park on parked arms does nothing: never a power-up")
+    q.ask("teleop", PARK_TOGGLE)
+    c.check(q.ask("voice", PARK_ONLY) == "already parked" and q.take() is None,
+            "a spoken park drops a waiting p that would power parked arms up")
+    arms.parked = False
+    q.ask("voice", PARK_ONLY)
+    q.ask("teleop", PARK_TOGGLE)
+    c.check(q.take() == ("voice", PARK_ONLY), "a p behind a waiting spoken park cannot undo it")
+    q.finished()
+    arms.parked = True
+    q.ask("teleop", PARK_TOGGLE)
+    c.check(q.take() == ("teleop", PARK_TOGGLE), "p still toggles: parked arms power up")
+    c.check(q.ask("voice", PARK_ONLY) == "parking the arms" and q.pending == ("voice", PARK_ONLY),
+            "a spoken park during a power-up parks right after it")
+    c.check(raises(q.ask, "voice", "unpark"), "an unknown park payload is refused, not read as a toggle")
     return c.exit_code
 
 

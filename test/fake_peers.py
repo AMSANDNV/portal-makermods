@@ -32,7 +32,10 @@ from livekit.portal import (
 
 from livekit.portal.recording import RrdSink
 
-from utils.common import RECORDER_IDENTITY, mint_token, pace
+from types import SimpleNamespace
+
+from utils.common import PARK_ONLY, PARK_RPC, RECORDER_IDENTITY, mint_token, pace
+from robot import ParkRequests
 from teleoperator import View
 from test._harness import (
     SEEN_ACTION_IDX,
@@ -76,7 +79,10 @@ class Impairment:
 
 
 class FakeRobot:
-    """Publishes tick-stamped state and frames; records what it receives."""
+    """Publishes tick-stamped state and frames; records what it receives.
+
+    It answers the park RPC with the robot's own bookkeeping; its arms park and power up in one tick.
+    """
 
     def __init__(self, room: str, url: str, fps: int = 30, identity: str = "robot",
                  impairment: "Impairment | None" = None) -> None:
@@ -93,11 +99,24 @@ class FakeRobot:
         self.actions_received: list[dict[str, float]] = []
         self.gate_changes: list[Optional[str]] = []
 
+        self.arms = SimpleNamespace(parked=False)
+        self.parking = ParkRequests(self.arms)
+
         self.portal.on_action(self._on_action)
         self.portal.on_active_operator_changed(self.gate_changes.append)
+        self.portal.register_rpc_method(PARK_RPC, lambda data: self.parking.ask(data.caller_identity, data.payload))
 
     def _on_action(self, action: Action) -> None:
         self.actions_received.append({k: float(v) for k, v in action.values.items()})
+
+    async def _park_or_power_up(self) -> None:
+        """What robot.py's loop does with a park request, minus the arms."""
+        if request := self.parking.take():
+            if not (self.arms.parked and request[1] == PARK_ONLY):
+                if not self.arms.parked:
+                    await self.portal.set_active_operator(None)
+                self.arms.parked = not self.arms.parked
+            self.parking.finished()
 
     async def connect(self) -> None:
         await self.portal.connect(self.url, mint_token(self.identity, self.room))
@@ -110,6 +129,7 @@ class FakeRobot:
         async for tick in pace(self.fps):
             if tick >= ticks:
                 return
+            await self._park_or_power_up()
             if imp.stall_every and tick and tick % imp.stall_every == 0:
                 await asyncio.sleep(imp.stall_ms / 1000.0)
             if imp.jitter_ms:

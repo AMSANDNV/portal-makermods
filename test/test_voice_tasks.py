@@ -4,8 +4,8 @@
 
 The voice agent's own connection (`PolicyLink`) calls `TaskControl`'s RPCs on a real Operator, with a fake
 robot holding the control gate and a fake teleoperator in the room: the spoken flow "put the blue cube in the
-box", "continue", "wait, the red cube instead", "continue", "teleop", "back to Dream-1", "stop", without the
-speech, the LLM, or Dream-1 inference in between.
+box", "continue", "wait, the red cube instead", "continue", "teleop", "back to Dream-1", "stop", "continue",
+"park the arms", without the speech, the LLM, or Dream-1 inference in between.
 """
 import asyncio
 import os
@@ -108,6 +108,16 @@ async def main() -> int:
                 checks.check(False, "an empty task is refused")
             except ToolError as error:
                 checks.check(tasks.task == RED, "an empty task is refused and the task kept", str(error))
+
+            await call(DREAM_RESUME_RPC)
+            reply = await link.park()
+            await asyncio.sleep(0.3)  # the robot releases control on its next tick
+            status = await call(DREAM_STATUS_RPC)
+            checks.check(reply == "parking the arms" and not status["driving"]
+                         and human.portal.active_operator() is None,
+                         "'park the arms' parks them, and Dream-1 no longer drives", f"{reply!r}, {status}")
+            reply = await link.park()
+            checks.check(reply == "already parked", "'park' again never powers parked arms up", repr(reply))
         finally:
             await link.close()
             await human.close()

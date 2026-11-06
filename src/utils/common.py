@@ -26,6 +26,8 @@ ROBOT_IDENTITY = "robot"
 TELEOPERATOR_IDENTITY = "teleoperator"
 RECORDER_IDENTITY = "recorder"
 PARK_RPC = "park"  # `p` in any operator: the robot parks the arms, or powers parked arms up
+PARK_TOGGLE = ""  # PARK_RPC payload for `p`: park, or power up parked arms
+PARK_ONLY = "park"  # PARK_RPC payload that only parks: never powers up, and parked arms stay as they are
 
 # The task-switching Dream-1 (`uv run dream-1-tasks`) answers these; the voice agent calls them.
 # Each takes and returns JSON; every reply is the status (see src/policies/dream_1_tasks/run.py).

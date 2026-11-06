@@ -24,14 +24,14 @@ uv run --group voice python -m test.test_voice_tasks
 |---|---|
 | `test_act` | Dataset field order, tensor mapping, training arguments, existing-output handling |
 | `test_teleop` | Control cycling, frame anchors, task selection, keyboard input, preview |
-| `test_resilience` | Per-arm CAN failure recovery, both-arms-or-nothing state, target-step and soft limits |
+| `test_resilience` | Per-arm CAN failure recovery, both-arms-or-nothing state, target-step and soft limits, park requests |
 | `test_dream1` | Dream-1 embodiment, camera roles, frame encoding, unit mapping, chunk layout |
 | `test_dream1_tasks` | A task change pauses first and never starts motion; pause, resume, teleop handoff; task sources |
 | `test_pubsub` | Discovery, control gate, observation transport |
 | `test_recorder` | Episode markers and frame/state/action alignment after an archive round trip |
 | `test_handoff` | Human → policy → human actions recorded in one episode |
 | `test_degraded` | Alignment under jitter, drops, and stalls |
-| `test_voice_tasks` | The voice agent's RPCs to a real operator: task, pause, resume, teleop handoff, stop words |
+| `test_voice_tasks` | The voice agent's RPCs to a real operator: task, pause, resume, teleop handoff, park, stop words |
 
 Synthetic peers encode tick indices in joint state, a white bar in video, and
 returned actions. The archive reader checks they agree using exact timestamp

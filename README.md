@@ -13,8 +13,8 @@ Follow these chapters in order:
 
 To collect human-only demonstrations instead, see the
 [alternative recording path](tutorial/09-reference.md#human-only-demonstrations).
-To steer Dream-1 by voice (change its task, pause and resume it, and hand the
-arms to the leaders), see [chapter 10](tutorial/10-voice-tasks.md).
+To steer Dream-1 by voice (change its task, pause and resume it, hand the arms
+to the leaders, and park them), see [chapter 10](tutorial/10-voice-tasks.md).
 
 You need two Metal leaders, two Metal followers, three USB cameras, Linux hardware
 hosts, Python 3.12, `uv`, and a LiveKit server. ACT training also needs a CUDA

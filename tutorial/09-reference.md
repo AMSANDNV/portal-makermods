@@ -93,6 +93,11 @@ and reopens them read-only so state keeps flowing. `p` in the robot terminal,
 teleop, Dream-1, or ACT parks, or powers parked arms up. Ctrl-C, or any other
 exit, parks before the robot stops.
 
+Each `p` is a `park` RPC to the robot with an empty payload, a toggle. The
+payload `"park"` only parks: on parked arms it does nothing, and it cancels a
+toggle still waiting, so it can never power the arms up. The voice agent's "park
+the arms" sends it. Powering up stays a `p` press.
+
 A park stops, and the arms keep holding under power, if an arm is unreadable,
 falls more than 10° behind its target (blocked), or ends more than 3° from its
 rest pose. A fault never switches the motors off.

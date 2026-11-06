@@ -5,9 +5,10 @@ reads both arms and the cameras, publishes them on one timestamp so operators ma
 one observation, and applies the active operator's latest action.
 
 `p` (here, in teleop, or in a policy) parks: the arms walk back to the starting pose and switch
-off, while state and video keep flowing. `p` again powers them up. Every exit, ctrl-c included,
-parks first, so the next start finds the arms off at rest. A park that cannot finish (an arm
-unreadable or blocked) leaves them holding.
+off, while state and video keep flowing. `p` again powers them up. The park RPC with payload
+"park" (the voice agent's "park the arms") only ever parks: parked arms stay off. Every exit,
+ctrl-c included, parks first, so the next start finds the arms off at rest. A park that cannot
+finish (an arm unreadable or blocked) leaves them holding.
 
 `uv run robot --check-arms` prints the followers' joints with the motors off: move an arm to see
 which link it is on.
@@ -20,11 +21,47 @@ import functools
 import time
 from typing import Iterator
 
-from utils.common import (CONFIG_PATH, PARK_RPC, ROBOT_IDENTITY, HardwareThread, TickBudget, env_int, load_env,
-                          mint_token, pace, required_env)
+from utils.common import (CONFIG_PATH, PARK_ONLY, PARK_RPC, PARK_TOGGLE, ROBOT_IDENTITY, HardwareThread, TickBudget,
+                          env_int, load_env, mint_token, pace, required_env)
 from livekit.portal import Action, Robot, RobotConfig
 from utils.hotkeys import Hotkeys
 from utils.metal import build_followers, check_arms
+
+
+class ParkRequests:
+    """Park and power-up requests from `p` and the park RPC, taken by the loop one at a time.
+
+    A toggle (`p`) parks or powers up. PARK_ONLY parks and nothing else: parked arms stay off (a
+    toggle still waiting is dropped), and one that arrives during a power-up parks right after it.
+    """
+
+    def __init__(self, followers) -> None:
+        self.followers = followers
+        self.pending: tuple[str, str] | None = None  # (who, payload) the loop takes next
+        self.running: str | None = None  # the payload the loop is carrying out
+
+    def ask(self, who: str, payload: str) -> str:
+        """Queue a request and say what will happen; raises on an unknown payload."""
+        if payload not in (PARK_TOGGLE, PARK_ONLY):
+            raise ValueError(f"unknown park request {payload!r}: send {PARK_TOGGLE!r} to toggle or {PARK_ONLY!r}")
+        if payload == PARK_ONLY:
+            if self.followers.parked and self.running is None:
+                self.pending = None  # a toggle still waiting would power them up
+                return "already parked"
+            self.pending = (who, PARK_ONLY)
+            return "parking the arms"
+        if self.pending and self.pending[1] == PARK_ONLY:
+            return "parking the arms"  # an explicit park waits; a toggle must not undo it
+        self.pending = (who, PARK_TOGGLE)
+        return "powering the arms up" if self.followers.parked else "parking the arms"
+
+    def take(self) -> tuple[str, str] | None:
+        request, self.pending = self.pending, None
+        self.running = request[1] if request else None
+        return request
+
+    def finished(self) -> None:
+        self.running = None
 
 
 def diagnostics(followers, budget: TickBudget) -> Iterator[str]:
@@ -52,7 +89,7 @@ async def main() -> None:
     hardware = HardwareThread("followers")
     hotkeys = Hotkeys(global_tap=False)  # this terminal only; works over SSH
     latest_action: dict[str, float] = {}
-    toggle_by: str | None = None  # who asked to park or power up
+    parking = ParkRequests(followers)
 
     def on_action(action: Action) -> None:
         nonlocal latest_action
@@ -72,11 +109,12 @@ async def main() -> None:
             asyncio.create_task(robot.set_active_operator(None))
 
     def on_park(data) -> str:
-        nonlocal toggle_by
-        toggle_by = data.caller_identity
-        return "powering the arms up" if followers.parked else "parking the arms"
+        return parking.ask(data.caller_identity, data.payload)
 
-    async def toggle_park(who: str) -> None:
+    async def toggle_park(who: str, payload: str) -> None:
+        if followers.parked and payload == PARK_ONLY:
+            print(f"[robot] {who}: already parked")
+            return
         if followers.parked:
             print(f"[robot] {who}: powering the arms up")
             step, done = followers.unpark, "arms powered up, holding where they rest"
@@ -103,10 +141,13 @@ async def main() -> None:
         print(f"[robot] connected; cameras={tracks}; {fps} fps; p parks or powers up, ctrl-c parks and stops")
         async for tick in pace(fps):
             if "p" in hotkeys.drain():
-                toggle_by = "this terminal"
-            if toggle_by:
-                who, toggle_by, latest_action = toggle_by, None, {}
-                await toggle_park(who)
+                parking.ask("this terminal", PARK_TOGGLE)
+            if request := parking.take():
+                latest_action = {}
+                try:
+                    await toggle_park(*request)
+                finally:
+                    parking.finished()
 
             # One stamp for state and frames, so they match into one observation.
             ts_us = robot.now_us()

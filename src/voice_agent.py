@@ -3,10 +3,11 @@
     uv run --group voice voice-agent console                      # this computer's mic and speaker
     uv run --group voice voice-agent connect --room portal-voice  # or talk to it from a browser in that room
 
-Say a task to change Dream-1's prompt, "stop" and "continue" to pause and resume it, and "teleop" to hand the arms
-to the person on the leader arms. The agent is not a Portal peer and never drives: it joins the robot's room as
-`voice-agent` and calls the RPCs `uv run dream-1-tasks` answers (src/utils/common.py names them). The conversation
-happens on this computer (console) or in a room of its own, never the robot's, whose peers are not people.
+Say a task to change Dream-1's prompt, "stop" and "continue" to pause and resume it, "teleop" to hand the arms
+to the person on the leader arms, and "park" to park them. The agent is not a Portal peer and never drives: it joins
+the robot's room as `voice-agent` and calls the RPCs `uv run dream-1-tasks` answers (src/utils/common.py names
+them), and the robot's own park, which only parks: powering up stays a `p` key. The conversation happens on this
+computer (console) or in a room of its own, never the robot's, whose peers are not people.
 
 The voice pipeline is the starter's (github.com/livekit-examples/agent-starter-python): LiveKit Inference for
 speech-to-text, the LLM, and text-to-speech, the LiveKit turn detector, and ai-coustics noise cancellation.
@@ -28,8 +29,8 @@ from livekit.agents import (Agent, AgentServer, AgentSession, JobContext, RunCon
 from livekit.plugins import ai_coustics
 
 from utils.common import (DREAM_PAUSE_RPC, DREAM_RESUME_RPC, DREAM_SET_TASK_RPC, DREAM_STATUS_RPC,
-                          DREAM_TASKS_IDENTITY, DREAM_TO_TELEOP_RPC, TELEOPERATOR_IDENTITY, env_str, load_env,
-                          mint_token, required_env)
+                          DREAM_TASKS_IDENTITY, DREAM_TO_TELEOP_RPC, PARK_ONLY, PARK_RPC, ROBOT_IDENTITY,
+                          TELEOPERATOR_IDENTITY, env_str, load_env, mint_token, required_env)
 
 logger = logging.getLogger("voice-agent")
 
@@ -43,8 +44,8 @@ STOP_REPEAT_S = 2.0  # interim transcripts repeat the word; pause once per utter
 INSTRUCTIONS = textwrap.dedent("""\
     You are the voice control for a two-armed robot. Dream-1, a robot policy, drives the arms by following one short
     task instruction, such as "put the blue cube in the box". A person, the teleoperator, can drive them instead by
-    moving two leader arms. You change Dream-1's task, pause and resume it, and switch control between Dream-1 and
-    the teleoperator. You cannot see the robot: you know only what your tools return.
+    moving two leader arms. You change Dream-1's task, pause and resume it, switch control between Dream-1 and
+    the teleoperator, and park the arms. You cannot see the robot: you know only what your tools return.
 
     # Output rules
 
@@ -63,6 +64,9 @@ INSTRUCTIONS = textwrap.dedent("""\
     - Stop, wait, hold on, pause: call pause.
     - Continue, go, resume, start, or "back to Dream-1": call resume. Never resume unless the user asks for it.
     - Teleop, manual, "I'll take over", "give me control": call switch_to_teleop.
+    - Park, "park the arm" or "arms", "put the arms away", "switch the arms off": call park_arms. It parks both arms,
+      whoever is driving. You cannot power them up: once parked, they stay off until someone presses p in a
+      terminal, and Dream-1 cannot move them until then. If the user asks to continue after a park, say so first.
     - What is happening, who is driving, which tasks there are: call status.
 
     # Guardrails
@@ -105,15 +109,22 @@ class PolicyLink:
 
     async def call(self, method: str, **payload) -> dict:
         """One RPC to Dream-1; every reply is its status. Raises ToolError, whose message the LLM reads."""
-        if DREAM_TASKS_IDENTITY not in self.room.remote_participants:  # else the call waits out its timeout
-            raise ToolError("Dream-1 is not in the room; start it with `uv run dream-1-tasks`")
+        return json.loads(await self._rpc(DREAM_TASKS_IDENTITY, "Dream-1", "uv run dream-1-tasks", method,
+                                          json.dumps(payload)))
+
+    async def park(self) -> str:
+        """Ask the robot itself to park both arms: it works whoever drives, Dream-1 running or not, and never
+        powers the arms up. Answers "parking the arms" or "already parked"."""
+        return await self._rpc(ROBOT_IDENTITY, "The robot", "uv run robot", PARK_RPC, PARK_ONLY)
+
+    async def _rpc(self, identity: str, name: str, start: str, method: str, payload: str) -> str:
+        if identity not in self.room.remote_participants:  # else the call waits out its timeout
+            raise ToolError(f"{name} is not in the room; start it with `{start}`")
         try:
-            reply = await self.room.local_participant.perform_rpc(
-                destination_identity=DREAM_TASKS_IDENTITY, method=method, payload=json.dumps(payload),
-                response_timeout=5.0)
+            return await self.room.local_participant.perform_rpc(
+                destination_identity=identity, method=method, payload=payload, response_timeout=5.0)
         except rtc.RpcError as error:
-            raise ToolError(f"Dream-1 refused: {error.message}") from error
-        return json.loads(reply)
+            raise ToolError(f"{name} refused: {error.message}") from error
 
     async def close(self) -> None:
         await self.room.disconnect()
@@ -160,6 +171,16 @@ class VoiceControl(Agent):
         status = describe(await self.link.call(DREAM_TO_TELEOP_RPC))
         return status + " Remind the user that the followers now track the leader arms."
 
+    @function_tool
+    async def park_arms(self, context: RunContext) -> str:
+        """Park both arms: the robot takes control from whoever drives, walks the arms slowly back to their rest
+        pose, and switches them off. They stay off until someone presses p in a terminal."""
+        if await self.link.park() == "already parked":
+            return "The arms were already parked and switched off; nothing moved."
+        return ("The robot is parking the arms: nobody drives now, and they walk slowly back to their rest pose, "
+                "then switch off. If an arm is blocked the park stops and they hold; the robot terminal says why. "
+                "Powering them up again is p in a terminal.")
+
 
 server = AgentServer()
 
@@ -183,7 +204,7 @@ async def entrypoint(ctx: JobContext) -> None:
         stt=inference.STT(model=env_str("VOICE_STT", "assemblyai/universal-3-6-pro"), language="en"),
         # Keyterms bias the STT toward words it would otherwise misspell.
         stt_context_options=STTContextOptions(
-            keyterms=["Dream-1", "teleop", "teleoperator"],
+            keyterms=["Dream-1", "teleop", "teleoperator", "park"],
             keyterm_detection={"enabled": True},
         ),
         # See all available models and voices at https://docs.livekit.io/agents/models/tts/

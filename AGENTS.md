@@ -15,7 +15,8 @@ Keep it small and readable. The README leads with the numbered `tutorial/`.
 - `src/policies/dream_1_tasks/` is that loop with a switchable task (`uv run dream-1-tasks`); it answers the `dream.*`
   RPCs named in `src/utils/common.py`: set the task, pause, resume, hand control to the teleoperator.
 - `src/voice_agent.py` (`uv run --group voice voice-agent`) is a LiveKit Agents voice agent on agent-starter-python's
-  pipeline that calls those RPCs. It is not a Portal peer and never sends actions.
+  pipeline that calls those RPCs, plus the robot's `park` RPC with payload `"park"`, which only parks (never powers
+  up). It is not a Portal peer and never sends actions.
 - `test/` checks behavior without hardware.
 
 Run the three peers as `uv run robot`, `uv run teleoperator`, and `uv run recorder`
