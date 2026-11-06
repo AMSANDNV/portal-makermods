@@ -4,8 +4,9 @@
     uv run --group voice voice-agent connect --room portal-voice  # or talk to it from a browser in that room
 
 Say a task to change Dream-1's prompt, "stop" and "continue" to pause and resume it, "teleop" to hand the arms
-to the person on the leader arms, "home" or "reset the arms" to walk them back to rest and hold them there, and
-"park" to park them. Ask "how is it going?" for the task monitor's estimate (`uv run task-monitor`,
+to the person on the leader arms, "hand teleop" to hand them to the webcam hand teleop (`uv run hand-teleop`,
+tutorial/11-hand-teleop.md), "home" or "reset the arms" to walk them back to rest and hold them there, and "park"
+to park them. Ask "how is it going?" for the task monitor's estimate (`uv run task-monitor`,
 tutorial/12-task-monitor.md): it reports here as Dream-1 works, and the agent tells you when the monitor judges the
 task done or stuck and pauses Dream-1. The agent is not a Portal peer and never drives: it joins the robot's room as
 `voice-agent` and calls the RPCs `uv run dream-1-tasks` answers (src/utils/common.py names them), and the robot's
@@ -35,9 +36,9 @@ from livekit.agents.llm.chat_context import DYNAMIC_INSTRUCTIONS_MESSAGE_ID
 from livekit.plugins import ai_coustics
 
 from utils.common import (DREAM_PAUSE_RPC, DREAM_RESUME_RPC, DREAM_SET_TASK_RPC, DREAM_STATUS_RPC,
-                          DREAM_TASKS_IDENTITY, DREAM_TO_TELEOP_RPC, HOME_RPC, MONITOR_REPORT_RPC, PARK_ONLY,
-                          PARK_RPC, ROBOT_IDENTITY, TELEOPERATOR_IDENTITY, VOICE_AGENT_IDENTITY, env_str, load_env,
-                          mint_token, required_env)
+                          DREAM_TASKS_IDENTITY, DREAM_TO_HAND_TELEOP_RPC, DREAM_TO_TELEOP_RPC, HAND_TELEOP_IDENTITY,
+                          HOME_RPC, MONITOR_REPORT_RPC, PARK_ONLY, PARK_RPC, ROBOT_IDENTITY, TELEOPERATOR_IDENTITY,
+                          VOICE_AGENT_IDENTITY, env_str, load_env, mint_token, required_env)
 
 logger = logging.getLogger("voice-agent")
 
@@ -51,10 +52,10 @@ REPORT_STALE_S = 15.0  # the task monitor reports every few seconds; older than 
 
 INSTRUCTIONS = textwrap.dedent("""\
     You are the voice control for a two-armed robot. Dream-1, a robot policy, drives the arms by following one short
-    task instruction, such as "put the blue cube in the box". A person, the teleoperator, can drive them instead by
-    moving two leader arms. You change Dream-1's task, pause and resume it, switch control between Dream-1 and
-    the teleoperator, send the arms home, and park them. You cannot see the robot: you know only what your tools
-    return.
+    task instruction, such as "put the blue cube in the box". A person can drive them instead, in one of two ways:
+    the teleoperator moves two leader arms, and the hand teleop follows the person's hands in front of a webcam.
+    You change Dream-1's task, pause and resume it, switch control between Dream-1, the teleoperator, and the hand
+    teleop, send the arms home, and park them. You cannot see the robot: you know only what your tools return.
 
     # Output rules
 
@@ -72,7 +73,10 @@ INSTRUCTIONS = textwrap.dedent("""\
       pauses Dream-1; then ask the user to say "continue" to resume, unless they already said to go.
     - Stop, wait, hold on, pause: call pause.
     - Continue, go, resume, start, or "back to Dream-1": call resume. Never resume unless the user asks for it.
-    - Teleop, manual, "I'll take over", "give me control": call switch_to_teleop.
+    - Teleop, leader arms, manual, "I'll take over", "give me control": call switch_to_teleop. If the leader-arm
+      teleoperator is not connected but the hand teleop is, ask whether to use hand teleop instead.
+    - Hand teleop, hand control, "my hands", "use the webcam", "hand tracking": call switch_to_hand_teleop. Each arm
+      then holds still until a hand grips it.
     - Home, "home the arms", "reset the arms", "reset", "back to the start position", "return to rest": call
       home_arms. It walks both arms back to their rest pose, whoever is driving, and keeps them powered there;
       nobody drives afterwards until the user says continue or teleop. It is not a park: never call park_arms to
@@ -102,6 +106,8 @@ def describe(status: dict) -> str:
     who = status.get("active_operator")
     if status.get("driving"):
         state = "Dream-1 is driving the arms"
+    elif who and who == status.get("hand_teleop", HAND_TELEOP_IDENTITY):
+        state = "the hand teleop is driving the arms from a webcam; Dream-1 is paused"
     elif who == TELEOPERATOR_IDENTITY:
         state = "the teleoperator is driving the arms with the leader arms; Dream-1 is paused"
     elif who:
@@ -109,8 +115,10 @@ def describe(status: dict) -> str:
     else:
         state = "Dream-1 is paused and the arms are holding still"
     teleop = "connected" if status.get("teleoperator_connected") else "not connected"
+    hands = "connected" if status.get("hand_teleop_connected") else "not connected"
     presets = "; ".join(f"{n}. {task}" for n, task in enumerate(status.get("presets", []), start=1))
-    return f"Task: {status.get('task')!r}. {state}. The teleoperator is {teleop}. Preset tasks: {presets}."
+    return (f"Task: {status.get('task')!r}. {state}. The leader-arm teleoperator is {teleop}; the hand teleop is "
+            f"{hands}. Preset tasks: {presets}.")
 
 
 def describe_report(report: dict | None, age_s: float = 0.0) -> str:
@@ -269,6 +277,13 @@ class VoiceControl(Agent):
         return status + " Remind the user that the followers now track the leader arms."
 
     @function_tool
+    async def switch_to_hand_teleop(self, context: RunContext) -> str:
+        """Hand the arms to the hand teleop, the person driving them with their hands in front of a webcam; Dream-1
+        stops driving. Not the leader arms: that is switch_to_teleop."""
+        status = describe(await self.link.call(DREAM_TO_HAND_TELEOP_RPC))
+        return status + " Remind the user that each arm holds still until a hand grips it."
+
+    @function_tool
     async def home_arms(self, context: RunContext) -> str:
         """Send both arms home: the robot takes control from whoever drives and walks the arms slowly back to their
         rest pose, where they stay powered on, holding. Not a park: Dream-1 or the teleoperator can drive again
@@ -316,7 +331,7 @@ async def entrypoint(ctx: JobContext) -> None:
         stt=inference.STT(model=env_str("VOICE_STT", "assemblyai/universal-3-6-pro"), language="en"),
         # Keyterms bias the STT toward words it would otherwise misspell.
         stt_context_options=STTContextOptions(
-            keyterms=["Dream-1", "teleop", "teleoperator", "park"],
+            keyterms=["Dream-1", "teleop", "teleoperator", "hand teleop", "park"],
             keyterm_detection={"enabled": True},
         ),
         # See all available models and voices at https://docs.livekit.io/agents/models/tts/

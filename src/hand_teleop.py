@@ -11,7 +11,8 @@ anchors anew, so the arm follows the hand's motion since the grip, never where t
 move back, grip again, as with a mouse.
 dream_ik turns each target tool pose into joints. See tutorial/11-hand-teleop.md.
 
-Keys: `c` takes or releases control, `p` parks or powers up the arms, `x` quits.
+Keys: `c` takes or releases control, `p` parks or powers up the arms, `x` quits. Saying "hand teleop" to the voice
+agent (tutorial/10-voice-tasks.md) hands it control too, through `uv run dream-1-tasks`.
 """
 from __future__ import annotations
 
@@ -30,14 +31,13 @@ import cv2
 import numpy as np
 
 from utils.common import (CONFIG_PATH, HardwareThread, claim_or_release, env_camera_id, env_float, env_int, env_str,
-                          load_env, mint_token, pace, request_park, required_env)
+                          hand_teleop_identity, load_env, mint_token, pace, request_park, required_env)
 from utils.hands import (BONES, INDEX_TIP, THUMB_TIP, ArmFollower, ArmsIK, Clutch, Hand, HandPose, Mapping,
                          assign_sides, camera_to_base, hand_pose)
 from utils.hotkeys import Hotkeys, input_backend_warning
 from utils.metal import SIDES, arm_fields, clamp_to_limits
 from utils.rerun_view import HAND_TELEOP_VIEWER_PORT, Preview
 
-IDENTITY = "hand-teleop"
 WEBCAM_VIEW = "webcam"
 MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/"
              "hand_landmarker.task")
@@ -370,7 +370,7 @@ async def main() -> None:
 
             op.on_observation(on_observation)
             op.on_active_operator_changed(on_active_operator_changed)
-            identity = env_str("HAND_TELEOP_IDENTITY", IDENTITY)
+            identity = hand_teleop_identity()
             print(f"[hands] connecting to {url} as '{identity}' in room '{room}' ...")
             await op.connect(url, mint_token(identity, room))
 

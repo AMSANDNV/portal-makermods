@@ -7,7 +7,7 @@ import unittest
 from unittest import mock
 
 from policies.dream_1_tasks.run import MAX_TASK_CHARS, TaskControl, session_tasks
-from utils.common import DREAM_TASKS_IDENTITY, TELEOPERATOR_IDENTITY
+from utils.common import DREAM_TASKS_IDENTITY, HAND_TELEOP_IDENTITY, TELEOPERATOR_IDENTITY
 from utils.session import DEFAULT_TASK
 
 ME = DREAM_TASKS_IDENTITY
@@ -82,6 +82,32 @@ class TaskControlTests(unittest.IsolatedAsyncioTestCase):
             await tasks.to_teleop("voice-agent")
         self.assertEqual(self.op.active, ME)  # Dream-1 keeps driving rather than leave nobody
 
+    async def test_hand_teleop_takes_over_from_dream1_and_gives_back(self):
+        tasks = self.control(active=ME, others=(TELEOPERATOR_IDENTITY, HAND_TELEOP_IDENTITY))
+        status = await tasks.to_hand_teleop("voice-agent")
+        self.assertEqual((self.op.active, status["active_operator"], status["driving"]),
+                         (HAND_TELEOP_IDENTITY, HAND_TELEOP_IDENTITY, False))
+        self.assertTrue((await tasks.resume("voice-agent"))["driving"])
+        self.assertEqual(self.op.active, ME)
+
+    async def test_hand_teleop_takes_over_from_the_leader_arms(self):
+        tasks = self.control(active=TELEOPERATOR_IDENTITY, others=(TELEOPERATOR_IDENTITY, HAND_TELEOP_IDENTITY))
+        await tasks.to_hand_teleop("voice-agent")
+        self.assertEqual(self.op.active, HAND_TELEOP_IDENTITY)
+
+    async def test_hand_teleop_must_be_connected(self):
+        tasks = self.control(active=ME)  # only the leader-arm teleoperator is connected
+        with self.assertRaisesRegex(ValueError, "hand-teleop"):
+            await tasks.to_hand_teleop("voice-agent")
+        self.assertEqual(self.op.active, ME)  # Dream-1 keeps driving rather than leave nobody
+
+    async def test_hand_teleop_identity_follows_its_setting(self):
+        with mock.patch.dict(os.environ, {"HAND_TELEOP_IDENTITY": "hands-2"}):
+            tasks = self.control(active=ME, others=("hands-2",))
+        status = await tasks.to_hand_teleop("voice-agent")
+        self.assertEqual((self.op.active, status["hand_teleop"], status["hand_teleop_connected"]),
+                         ("hands-2", "hands-2", True))
+
     async def test_task_text_is_tidied_and_bounded(self):
         tasks = self.control()
         self.assertEqual((await tasks.set_task("  put the red\n cube  in the box ", "t"))["task"], RED)
@@ -105,7 +131,8 @@ class TaskControlTests(unittest.IsolatedAsyncioTestCase):
     def test_status_lists_the_presets(self):
         status = self.control().status()
         self.assertEqual(status, {"task": BLUE, "presets": [BLUE, RED], "driving": False, "active_operator": None,
-                                  "teleoperator_connected": True})
+                                  "teleoperator_connected": True, "hand_teleop": HAND_TELEOP_IDENTITY,
+                                  "hand_teleop_connected": False})
 
 
 class SessionTaskTests(unittest.TestCase):

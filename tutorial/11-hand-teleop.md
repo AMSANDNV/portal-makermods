@@ -41,7 +41,8 @@ uv run --group hands hand-teleop
 
 Its window shows the robot's cameras beside the webcam, apart from any window the teleoperator or
 `recorder --observe-only` has open. Press `c` to take control (and again to release it), as in a
-policy; `p` parks, `x` quits.
+policy; `p` parks, `x` quits. With [chapter 10](10-voice-tasks.md)'s voice agent and
+`dream-1-tasks` running, saying "hand teleop" hands it control too, and "back to Dream-1" takes it back.
 Gripping does nothing until this operator has control and a fresh robot view. Each time control
 comes back, the next grip starts from where the arms are.
 

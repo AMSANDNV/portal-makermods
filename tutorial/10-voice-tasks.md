@@ -4,7 +4,8 @@ Dream-1 follows a one-line task prompt. In [chapter 2](02-dream-1.md) that promp
 is fixed when the process starts, and `c` is the only way to hand over control.
 Here you run a Dream-1 operator whose task can change while it runs, and a voice
 agent that lets you change the task, pause and resume Dream-1, pass the arms
-between Dream-1 and the leader arms, send them home, and park them, by talking:
+between Dream-1, the leader arms, and your hands in front of a webcam, send them
+home, and park them, by talking:
 
 > **You:** Put the blue cube in the box.\
 > **Agent:** Task set; say "continue" when you're ready for me to start.\
@@ -14,6 +15,7 @@ between Dream-1 and the leader arms, send them home, and park them, by talking:
 > **You:** Continue. *(Dream-1 starts on the red cube from where the arms are.)*\
 > **You:** Switch to teleop. *(The followers track the leader arms.)*\
 > **You:** Okay, back to Dream-1. *(Dream-1 takes over again.)*\
+> **You:** Hand teleop. *(Your hands in front of the webcam drive the arms; each holds until a hand grips it.)*\
 > **You:** Reset the arms. *(They walk back to their rest pose and hold there, powered.)*\
 > **You:** Continue. *(Dream-1 starts its task again from the rest pose.)*\
 > **You:** Park the arms. *(They walk back to their rest pose and switch off.)*
@@ -24,7 +26,8 @@ stop: a spoken "stop" takes effect a second or two after you say it. To interven
 faster, take over with the leaders (`c` in teleop) or park (`p`).
 
 Complete [chapter 2](02-dream-1.md) first: this chapter uses the same rig,
-Dream-1 key, and running robot, recorder, and teleoperator.
+Dream-1 key, and running robot, recorder, and teleoperator. For "hand teleop",
+also run [chapter 11](11-hand-teleop.md)'s webcam hand teleop.
 
 ## 1. How it fits
 
@@ -62,11 +65,14 @@ teleop" hands the arms to the leaders. On parked arms it does nothing.
 | `dream.pause` | `{}` | Dream-1 releases control if it has it; the robot holds the arms |
 | `dream.resume` | `{}` | Dream-1 takes control from whoever has it, starting a new episode |
 | `dream.to_teleop` | `{}` | Control passes to `teleoperator`; the followers track the leaders |
+| `dream.to_hand_teleop` | `{}` | Control passes to `hand-teleop` (`HAND_TELEOP_IDENTITY`); each arm holds until a hand grips it |
 
 Every reply is the same JSON status: `task`, `presets`, `driving`,
-`active_operator`, and `teleoperator_connected`. A pause leaves no operator
-active, so the robot sends no commands and the followers hold their last target
-under power. A pause while the teleoperator drives changes nothing.
+`active_operator`, `teleoperator_connected`, `hand_teleop` (its identity), and
+`hand_teleop_connected`. A pause leaves no operator active, so the robot sends no
+commands and the followers hold their last target under power. A pause while
+either teleop drives changes nothing. Both handoffs go only to an operator that
+is connected; otherwise Dream-1 keeps what it has.
 
 ## 2. Install the voice agent
 
@@ -125,6 +131,7 @@ The agent greets you with the current task and who is driving. Then:
 | "Continue", "go", "start", "back to Dream-1" | `dream.resume` |
 | "Stop", "wait", "hold on", "pause" | `dream.pause` |
 | "Switch to teleop", "I'll take over" | `dream.to_teleop` |
+| "Hand teleop", "I'll use my hands" | `dream.to_hand_teleop` |
 | "Home the arms", "reset the arms" | the robot's `home` |
 | "Park the arms", "put the arms away" | the robot's `park`, payload `"park"` |
 | "What's happening?", "who's driving?" | `dream.status` |
@@ -133,6 +140,10 @@ The agent greets you with the current task and who is driving. Then:
 
 Before "switch to teleop", hold the leaders near the followers' pose, as before
 pressing `c`: the followers start tracking them at once, within the step limit.
+"Hand teleop" needs no lining up: the arms hold until a hand grips, and each grip
+moves its arm relative to where it is, as in [chapter 11](11-hand-teleop.md).
+Saying just "teleop" means the leaders; if only the hand teleop is connected, the
+agent asks whether you meant it.
 
 "Stop", "wait", "hold on", "pause", and "freeze" are matched in the live
 transcript and pause Dream-1 before you finish the sentence. The LLM still reads
@@ -184,12 +195,12 @@ a chunk planned for the blue cube is never played under the red cube's prompt.
 The arms ramp from where they are, as after a handoff.
 
 [`src/voice_agent.py`](../src/voice_agent.py) keeps the starter's pipeline:
-AssemblyAI speech-to-text with keyterms (`Dream-1`, `teleop`, `park`), Gemma 4 as the
+AssemblyAI speech-to-text with keyterms (`Dream-1`, `teleop`, `hand teleop`, `park`), Gemma 4 as the
 LLM, Fish Audio speech with expressive mode, the LiveKit turn detector with
 preemptive generation, and ai-coustics noise cancellation on the room's
-microphone. On top of it, `VoiceControl` has seven tools: `status`,
-`change_task`, `pause`, `resume`, `switch_to_teleop`, `home_arms`, and
-`park_arms`. Each calls
+microphone. On top of it, `VoiceControl` has eight tools: `status`,
+`change_task`, `pause`, `resume`, `switch_to_teleop`, `switch_to_hand_teleop`,
+`home_arms`, and `park_arms`. Each calls
 one RPC through `PolicyLink`, the agent's own connection to the robot's room, and
 returns the result as a sentence, so the agent reports only what happened. The
 fast pause is a `user_input_transcribed` handler that matches stop words in
@@ -209,6 +220,9 @@ and the RPCs between the agent's connection and a real operator.
   `p` in the robot, teleop, or `dream-1-tasks` terminal to power them up first.
 - **"The teleoperator is not connected."** Start `uv run teleoperator` on the
   teleop host; the agent hands control only to a connected teleoperator.
+- **"The hand teleop is not connected."** Start `uv run --group hands hand-teleop`
+  ([chapter 11](11-hand-teleop.md)) with the same `LIVEKIT_URL` and `LIVEKIT_ROOM`.
+  If you set `HAND_TELEOP_IDENTITY`, set it where `dream-1-tasks` runs too.
 - **The agent cannot reach its models.** LiveKit Inference needs a Cloud
   project's key: `LIVEKIT_API_KEY` for a Cloud `LIVEKIT_URL`, otherwise
   `LIVEKIT_INFERENCE_API_KEY` and `LIVEKIT_INFERENCE_API_SECRET`.

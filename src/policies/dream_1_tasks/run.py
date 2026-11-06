@@ -4,7 +4,8 @@
 
 The control loop is `uv run dream-1`'s (src/policies/dream_1/run.py); what changes is where the prompt comes
 from. `TaskControl` holds it: keys `1`-`9` pick one of the session's tasks, and other peers, over RPC, change it,
-pause and resume Dream-1, or hand the arms to the teleoperator. The voice agent (`uv run voice-agent`) is one.
+pause and resume Dream-1, or hand the arms to the teleoperator or the webcam hand teleop. The voice agent
+(`uv run voice-agent`) is one.
 
 A task change while Dream-1 drives releases control first, so the arms hold until someone resumes: a new task
 never starts motion. Each resume starts a new Dream-1 episode on the current task. Keys in this terminal: `c`
@@ -27,9 +28,9 @@ from livekit.portal import Operator, OperatorConfig, RpcError, frame_bytes_to_nu
 from policies.dream_1.run import (CAMERAS, ROW_HZ, STALE_S, chunk_rows, embodiment, encode_frame, retry_delay,
                                   to_model, to_robot)
 from utils.common import (CONFIG_PATH, DREAM_PAUSE_RPC, DREAM_RESUME_RPC, DREAM_SET_TASK_RPC, DREAM_STATUS_RPC,
-                          DREAM_TASKS_IDENTITY, DREAM_TO_TELEOP_RPC, TELEOPERATOR_IDENTITY, HardwareThread,
-                          claim_or_release, env_float, env_int, env_str, load_env, mint_token, pace, request_park,
-                          required_env)
+                          DREAM_TASKS_IDENTITY, DREAM_TO_HAND_TELEOP_RPC, DREAM_TO_TELEOP_RPC, TELEOPERATOR_IDENTITY,
+                          HardwareThread, claim_or_release, env_float, env_int, env_str, hand_teleop_identity, load_env,
+                          mint_token, pace, request_park, required_env)
 from utils.hotkeys import Hotkeys
 from utils.session import DEFAULT_TASK, MAX_TASKS, preset_tasks
 
@@ -48,15 +49,19 @@ class TaskControl:
         self.presets = presets
         self.task = presets[0]
         self.changed = False
+        self.hand_teleop = hand_teleop_identity()
 
     def driving(self) -> bool:
         return self.op.active_operator() == self.op.local_identity()
 
     def status(self) -> dict:
-        """What every RPC answers: the task, the presets, who drives, and whether the teleoperator could."""
+        """What every RPC answers: the task, the presets, who drives, and whether the teleoperator or the hand
+        teleop could."""
+        operators = self.op.operators()
         return {"task": self.task, "presets": self.presets, "driving": self.driving(),
                 "active_operator": self.op.active_operator(),
-                "teleoperator_connected": TELEOPERATOR_IDENTITY in self.op.operators()}
+                "teleoperator_connected": TELEOPERATOR_IDENTITY in operators,
+                "hand_teleop": self.hand_teleop, "hand_teleop_connected": self.hand_teleop in operators}
 
     async def set_task(self, task: str, who: str) -> dict:
         """Prompt Dream-1 with `task` from now on. Releases control first if Dream-1 drives."""
@@ -85,11 +90,19 @@ class TaskControl:
 
     async def to_teleop(self, who: str) -> dict:
         """Hand control to the teleoperator, the person on the leader arms."""
-        if TELEOPERATOR_IDENTITY not in self.op.operators():
-            raise ValueError("the teleoperator is not connected; start `uv run teleoperator`")
-        if self.op.active_operator() != TELEOPERATOR_IDENTITY:
-            print(f"[{WHO}] {who}: handing control to the teleoperator")
-            await self._hand_to(TELEOPERATOR_IDENTITY)
+        return await self._to_human(TELEOPERATOR_IDENTITY, "the teleoperator", "uv run teleoperator", who)
+
+    async def to_hand_teleop(self, who: str) -> dict:
+        """Hand control to the webcam hand teleop. The arms hold until a hand grips one."""
+        return await self._to_human(self.hand_teleop, "the hand teleop", "uv run --group hands hand-teleop", who)
+
+    async def _to_human(self, identity: str, name: str, start: str, who: str) -> dict:
+        """Hand control to a human's operator, only one that is connected: else Dream-1 keeps what it has."""
+        if identity not in self.op.operators():
+            raise ValueError(f"{name} is not connected; start `{start}`")
+        if self.op.active_operator() != identity:
+            print(f"[{WHO}] {who}: handing control to {name} ({identity})")
+            await self._hand_to(identity)
         return self.status()
 
     async def _hand_to(self, identity: str | None) -> None:
@@ -120,6 +133,8 @@ class TaskControl:
         self.op.register_rpc_method(DREAM_PAUSE_RPC, handler(lambda _payload, who: self.pause(who)))
         self.op.register_rpc_method(DREAM_RESUME_RPC, handler(lambda _payload, who: self.resume(who)))
         self.op.register_rpc_method(DREAM_TO_TELEOP_RPC, handler(lambda _payload, who: self.to_teleop(who)))
+        self.op.register_rpc_method(DREAM_TO_HAND_TELEOP_RPC,
+                                    handler(lambda _payload, who: self.to_hand_teleop(who)))
 
 
 def session_tasks(given: list[str] | None) -> list[str]:

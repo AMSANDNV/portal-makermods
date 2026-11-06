@@ -14,7 +14,7 @@ Follow these chapters in order:
 To collect human-only demonstrations instead, see the
 [alternative recording path](tutorial/09-reference.md#human-only-demonstrations).
 To steer Dream-1 by voice (change its task, pause and resume it, hand the arms
-to the leaders, send them home, and park them), see [chapter 10](tutorial/10-voice-tasks.md). To have
+to the leaders or the webcam hand teleop, send them home, and park them), see [chapter 10](tutorial/10-voice-tasks.md). To have
 a task monitor pause Dream-1 when its task is done or stuck, and tell you by voice, see
 [chapter 12](tutorial/12-task-monitor.md).
 

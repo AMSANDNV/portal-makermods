@@ -24,6 +24,7 @@ CONFIG_PATH = ROOT / "portal.yaml"
 
 ROBOT_IDENTITY = "robot"
 TELEOPERATOR_IDENTITY = "teleoperator"
+HAND_TELEOP_IDENTITY = "hand-teleop"  # the webcam hand teleop's default; see hand_teleop_identity()
 RECORDER_IDENTITY = "recorder"
 PARK_RPC = "park"  # `p` in any operator: the robot parks the arms, or powers parked arms up
 PARK_TOGGLE = ""  # PARK_RPC payload for `p`: park, or power up parked arms
@@ -38,6 +39,7 @@ DREAM_SET_TASK_RPC = "dream.set_task"  # {"task": "put the red cube in the box"}
 DREAM_PAUSE_RPC = "dream.pause"  # Dream-1 releases control; the arms hold
 DREAM_RESUME_RPC = "dream.resume"  # Dream-1 takes control, starting a new episode on the current task
 DREAM_TO_TELEOP_RPC = "dream.to_teleop"  # control passes to the teleoperator's leader arms
+DREAM_TO_HAND_TELEOP_RPC = "dream.to_hand_teleop"  # control passes to the webcam hand teleop
 
 # The task monitor (`uv run task-monitor`) watches dream-1-tasks drive and calls this on the voice agent with its
 # report as JSON, every few seconds and at once on a verdict (see src/task_monitor.py).
@@ -88,6 +90,11 @@ def env_int(name: str, default: int) -> int:
 
 def env_float(name: str, default: float) -> float:
     return float(os.environ.get(name) or default)
+
+
+def hand_teleop_identity() -> str:
+    """The webcam hand teleop's identity: `HAND_TELEOP_IDENTITY`, else "hand-teleop". Read after `load_env()`."""
+    return env_str("HAND_TELEOP_IDENTITY", HAND_TELEOP_IDENTITY)
 
 
 def env_camera_id(name: str, default: str) -> int | str:
