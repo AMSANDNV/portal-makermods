@@ -18,6 +18,7 @@ import asyncio
 from utils.common import CONFIG_PATH, RECORDER_IDENTITY, env_int, env_str, load_env, mint_token, required_env
 from livekit.portal import Observer, ObserverConfig
 from livekit.portal.recording import RrdSink
+import numpy as np
 import rerun as rr
 import rerun.blueprint as rrb
 
@@ -63,6 +64,12 @@ class LiveSink(RrdSink):
         self._rec.spawn(memory_limit="25%")  # the viewer drops the oldest data past this
         self._rec.send_blueprint(layout(session))
         self._now_us = session.now_us
+
+    def write_frame(self, track: str, frame) -> None:
+        """Only the newest frame per camera (static), so the viewer's memory stays flat; plots keep their history."""
+        pixels = np.frombuffer(frame.data, dtype=np.uint8).reshape(frame.height, frame.width, 3)
+        self._stream().log(f"observation/{rr.escape_entity_path_part(track)}",
+                           rr.Image(pixels).compress(jpeg_quality=self.jpeg_quality), static=True)
 
 
 def status(obs: Observer) -> str:
