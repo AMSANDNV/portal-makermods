@@ -4,7 +4,7 @@ Dream-1 follows a one-line task prompt. In [chapter 2](02-dream-1.md) that promp
 is fixed when the process starts, and `c` is the only way to hand over control.
 Here you run a Dream-1 operator whose task can change while it runs, and a voice
 agent that lets you change the task, pause and resume Dream-1, pass the arms
-between Dream-1 and the leader arms, and park them, by talking:
+between Dream-1 and the leader arms, send them home, and park them, by talking:
 
 > **You:** Put the blue cube in the box.\
 > **Agent:** Task set; say "continue" when you're ready for me to start.\
@@ -14,6 +14,8 @@ between Dream-1 and the leader arms, and park them, by talking:
 > **You:** Continue. *(Dream-1 starts on the red cube from where the arms are.)*\
 > **You:** Switch to teleop. *(The followers track the leader arms.)*\
 > **You:** Okay, back to Dream-1. *(Dream-1 takes over again.)*\
+> **You:** Reset the arms. *(They walk back to their rest pose and hold there, powered.)*\
+> **You:** Continue. *(Dream-1 starts its task again from the rest pose.)*\
 > **You:** Park the arms. *(They walk back to their rest pose and switch off.)*
 
 **A new task never starts motion.** Changing the task while Dream-1 drives pauses
@@ -40,12 +42,18 @@ calls RPC methods on `policy-dream-1-tasks`, which changes its own prompt or
 moves the robot's control gate, as `c` does. The agent has no Portal role, so it
 never appears in teleop's `c` ring and cannot send actions.
 
-"Park" is the one request that goes to the robot itself: the agent calls the
-robot's `park` RPC with the payload `"park"`, so it works whoever drives and
-whether or not `dream-1-tasks` runs. The robot takes control from everyone,
-walks both arms back to their rest pose, and switches them off, as `p` does. That
-payload only ever parks: on parked arms it does nothing. Powering them up stays a
-`p` key in a terminal, so voice can switch the motors off but never on.
+"Home" and "park" are the two requests that go to the robot itself, so they work
+whoever drives and whether or not `dream-1-tasks` runs. For "park" the agent
+calls the robot's `park` RPC with the payload `"park"`: the robot takes control
+from everyone, walks both arms back to their rest pose, and switches them off, as
+`p` does. That payload only ever parks: on parked arms it does nothing. Powering
+them up stays a `p` key in a terminal, so voice can switch the motors off but
+never on.
+
+For "home" or "reset the arms" it calls the robot's `home` RPC: the same walk back
+to the rest pose, but the motors stay on and the arms hold there. Nobody drives
+afterwards, so "continue" starts Dream-1 from the rest pose and "switch to
+teleop" hands the arms to the leaders. On parked arms it does nothing.
 
 | Method | Payload | Effect |
 |---|---|---|
@@ -117,8 +125,10 @@ The agent greets you with the current task and who is driving. Then:
 | "Continue", "go", "start", "back to Dream-1" | `dream.resume` |
 | "Stop", "wait", "hold on", "pause" | `dream.pause` |
 | "Switch to teleop", "I'll take over" | `dream.to_teleop` |
+| "Home the arms", "reset the arms" | the robot's `home` |
 | "Park the arms", "put the arms away" | the robot's `park`, payload `"park"` |
 | "What's happening?", "who's driving?" | `dream.status` |
+| "How's it going?", "is it done?" | `dream.status`, plus the task monitor's estimate ([chapter 12](12-task-monitor.md)) |
 | "Put the red cube in the box and go" | `dream.set_task`, then `dream.resume` |
 
 Before "switch to teleop", hold the leaders near the followers' pose, as before
@@ -177,8 +187,9 @@ The arms ramp from where they are, as after a handoff.
 AssemblyAI speech-to-text with keyterms (`Dream-1`, `teleop`, `park`), Gemma 4 as the
 LLM, Fish Audio speech with expressive mode, the LiveKit turn detector with
 preemptive generation, and ai-coustics noise cancellation on the room's
-microphone. On top of it, `VoiceControl` has six tools: `status`,
-`change_task`, `pause`, `resume`, `switch_to_teleop`, and `park_arms`. Each calls
+microphone. On top of it, `VoiceControl` has seven tools: `status`,
+`change_task`, `pause`, `resume`, `switch_to_teleop`, `home_arms`, and
+`park_arms`. Each calls
 one RPC through `PolicyLink`, the agent's own connection to the robot's room, and
 returns the result as a sentence, so the agent reports only what happened. The
 fast pause is a `user_input_transcribed` handler that matches stop words in
@@ -192,8 +203,8 @@ and the RPCs between the agent's connection and a real operator.
 
 - **The agent says Dream-1 is not in the room.** Start `uv run dream-1-tasks`,
   and check both use the same `LIVEKIT_URL` and `LIVEKIT_ROOM`.
-- **The agent says the robot is not in the room.** "Park" goes to the robot
-  itself: start `uv run robot` with the same `LIVEKIT_URL` and `LIVEKIT_ROOM`.
+- **The agent says the robot is not in the room.** "Home" and "park" go to the
+  robot itself: start `uv run robot` with the same `LIVEKIT_URL` and `LIVEKIT_ROOM`.
 - **"Continue" after a park moves nothing.** Parked arms ignore actions. Press
   `p` in the robot, teleop, or `dream-1-tasks` terminal to power them up first.
 - **"The teleoperator is not connected."** Start `uv run teleoperator` on the
@@ -213,4 +224,4 @@ and the RPCs between the agent's connection and a real operator.
 
 ---
 
-Previous: [9. Configuration and troubleshooting](09-reference.md) · [Tutorial index](../README.md#the-tutorial)
+Previous: [9. Configuration and troubleshooting](09-reference.md) · [Tutorial index](../README.md#the-tutorial) · Next: [12. Watch Dream-1 finish, or get stuck](12-task-monitor.md)

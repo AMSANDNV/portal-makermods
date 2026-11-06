@@ -187,6 +187,23 @@ def main() -> int:
             "a blocked arm stops the park: nothing is switched off")
 
     p = parking()
+    p.limiter.present.update(action([0.5] * 7, [0.5] * 7))
+    p.go_home(fps=100)
+    poses = [a._arm.pose for a in p.arms.values()]
+    c.check(all(max(map(abs, pose[:6])) < 1e-6 for pose in poses), "home walks both arms to their rest pose")
+    c.check(all(math.isclose(pose[6], 30.0) for pose in poses), "home leaves the grippers as they were")
+    powered = not any(a._arm.off for a in p.arms.values()) and all(a.opened == [] for a in p.arms.values())
+    c.check(not p.parked and powered, "home is not a park: the arms stay powered, holding at rest")
+    c.check(not p.limiter.present, "after home, no command before a fresh read")
+    p.park(fps=100)
+    before = len(p.arms["left"]._arm.commands)
+    c.check(raises(p.go_home, 100) and len(p.arms["left"]._arm.commands) == before and p.parked,
+            "home on parked arms refuses: nothing moves, nothing powers up")
+    p = parking(blocked=True)
+    c.check(raises(p.go_home, 100) and not any(a._arm.off for a in p.arms.values()),
+            "a blocked arm stops home: the arms hold where they are")
+
+    p = parking()
     p.arms["right"]._arm.raises = True
     c.check(raises(p.park, 100) and not p.arms["left"]._arm.commands and not p.arms["left"]._arm.off,
             "an unreadable arm: no park, nothing moves, nothing switched off")
@@ -224,6 +241,27 @@ def main() -> int:
     c.check(q.ask("voice", PARK_ONLY) == "parking the arms" and q.pending == ("voice", PARK_ONLY),
             "a spoken park during a power-up parks right after it")
     c.check(raises(q.ask, "voice", "unpark"), "an unknown park payload is refused, not read as a toggle")
+
+    arms = SimpleNamespace(parked=False)
+    q = ParkRequests(arms)
+    c.check(q.home("voice") == "returning the arms home" and q.take() == ("voice", ParkRequests.HOME),
+            "home on powered arms queues a return to rest")
+    c.check(q.home("voice") == "returning the arms home" and q.take() is None,
+            "home during a return home queues nothing more")
+    q.finished()
+    q.home("voice")
+    c.check(q.ask("teleop", PARK_TOGGLE) == "parking the arms" and q.take() == ("teleop", PARK_TOGGLE),
+            "a p behind a waiting home parks instead")
+    q.ask("voice", PARK_ONLY)
+    c.check(q.home("voice") == "parking the arms" and q.take() == ("voice", PARK_ONLY),
+            "home behind a waiting park leaves the park")
+    q.finished()
+    arms.parked = True
+    c.check(q.home("voice").startswith("parked") and q.take() is None, "home on parked arms never powers them up")
+    q.ask("teleop", PARK_TOGGLE)
+    q.take()
+    c.check(q.home("voice") == "powering the arms up" and q.pending is None,
+            "home during a power-up queues nothing: the arms come up at rest")
     return c.exit_code
 
 

@@ -10,6 +10,10 @@ off, while state and video keep flowing. `p` again powers them up. The park RPC 
 ctrl-c included, parks first, so the next start finds the arms off at rest. A park that cannot
 finish (an arm unreadable or blocked) leaves them holding.
 
+The home RPC walks the arms back to that same pose and leaves them powered, holding there. It
+releases control first, so no operator drives until one is selected again (`c`). Parked arms
+stay parked.
+
 `uv run robot --check-arms` prints the followers' joints with the motors off: move an arm to see
 which link it is on.
 """
@@ -21,19 +25,23 @@ import functools
 import time
 from typing import Iterator
 
-from utils.common import (CONFIG_PATH, PARK_ONLY, PARK_RPC, PARK_TOGGLE, ROBOT_IDENTITY, HardwareThread, TickBudget,
-                          env_int, load_env, mint_token, pace, required_env)
+from utils.common import (CONFIG_PATH, HOME_RPC, PARK_ONLY, PARK_RPC, PARK_TOGGLE, ROBOT_IDENTITY, HardwareThread,
+                          TickBudget, env_int, load_env, mint_token, pace, required_env)
 from livekit.portal import Action, Robot, RobotConfig
 from utils.hotkeys import Hotkeys
 from utils.metal import build_followers, check_arms
 
 
 class ParkRequests:
-    """Park and power-up requests from `p` and the park RPC, taken by the loop one at a time.
+    """Park, power-up, and home requests from `p` and the RPCs, taken by the loop one at a time.
 
     A toggle (`p`) parks or powers up. PARK_ONLY parks and nothing else: parked arms stay off (a
     toggle still waiting is dropped), and one that arrives during a power-up parks right after it.
+    HOME walks powered arms back to rest and holds them there. It never parks or powers up, and it
+    gives way to a park or power-up already waiting or under way, which ends at rest too.
     """
+
+    HOME = "home"  # queued only by `home()`, never a park payload
 
     def __init__(self, followers) -> None:
         self.followers = followers
@@ -54,6 +62,18 @@ class ParkRequests:
             return "parking the arms"  # an explicit park waits; a toggle must not undo it
         self.pending = (who, PARK_TOGGLE)
         return "powering the arms up" if self.followers.parked else "parking the arms"
+
+    def home(self, who: str) -> str:
+        """Queue a return to rest and say what will happen."""
+        busy = self.pending[1] if self.pending else self.running
+        if busy in (PARK_TOGGLE, PARK_ONLY):
+            return "powering the arms up" if busy == PARK_TOGGLE and self.followers.parked else "parking the arms"
+        if busy == self.HOME:
+            return "returning the arms home"
+        if self.followers.parked:
+            return "parked: the arms are off at rest; p powers them up"
+        self.pending = (who, self.HOME)
+        return "returning the arms home"
 
     def take(self) -> tuple[str, str] | None:
         request, self.pending = self.pending, None
@@ -111,6 +131,9 @@ async def main() -> None:
     def on_park(data) -> str:
         return parking.ask(data.caller_identity, data.payload)
 
+    def on_home(data) -> str:
+        return parking.home(data.caller_identity)
+
     async def toggle_park(who: str, payload: str) -> None:
         if followers.parked and payload == PARK_ONLY:
             print(f"[robot] {who}: already parked")
@@ -128,7 +151,20 @@ async def main() -> None:
         except Exception as exc:
             print(f"[robot] {exc}; press p to try again")
 
+    async def go_home(who: str) -> None:
+        if followers.parked:  # a park ran first
+            print(f"[robot] {who}: parked, so not returning home; p powers the arms up")
+            return
+        print(f"[robot] {who}: releasing control and returning the arms home ...")
+        await robot.set_active_operator(None)  # an operator's next action would pull them straight back out
+        try:
+            await hardware.run(followers.go_home, fps)
+            print("[robot] home: arms holding at rest; c gives an operator control")
+        except Exception as exc:
+            print(f"[robot] {exc}")
+
     robot.register_rpc_method(PARK_RPC, on_park)
+    robot.register_rpc_method(HOME_RPC, on_home)
     robot.on_action(on_action)
     robot.on_active_operator_changed(on_active_operator_changed)
     robot.on_operator_left(on_operator_left)
@@ -145,7 +181,10 @@ async def main() -> None:
             if request := parking.take():
                 latest_action = {}
                 try:
-                    await toggle_park(*request)
+                    if request[1] == ParkRequests.HOME:
+                        await go_home(request[0])
+                    else:
+                        await toggle_park(*request)
                 finally:
                     parking.finished()
 

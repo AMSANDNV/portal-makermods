@@ -27,6 +27,9 @@ may control the robot.
 [Chapter 10](10-voice-tasks.md) adds `uv run dream-1-tasks`, a Dream-1 whose
 task can change while it runs, and a voice agent that changes the task and who
 drives. The voice agent is not a Portal peer: it asks Dream-1 over RPC.
+[Chapter 12](12-task-monitor.md) adds a task monitor, an observer that judges
+from the overhead camera when Dream-1's task is done or stuck, pauses it, and
+tells the voice agent.
 
 The human and policy use the same operator interface. The robot accepts actions
 from one active operator at a time. Pressing `c` in teleop changes that operator;
@@ -46,7 +49,8 @@ you can switch during a take while the recorder continues writing.
 1. [Set up the rig and check human control](01-first-recording.md).
 2. [Run Dream-1 and record your corrections](02-dream-1.md).
 3. [Train ACT on the corrected takes](03-train-act.md), then collect more corrections.
-4. Optionally, [steer Dream-1 by voice](10-voice-tasks.md).
+4. Optionally, [steer Dream-1 by voice](10-voice-tasks.md), and
+   [let a task monitor pause it when it is done or stuck](12-task-monitor.md).
 
 Human-only demonstrations are an [alternative](09-reference.md#human-only-demonstrations).
 Chapters 4–8 explain the code; chapter 9 is the settings reference.

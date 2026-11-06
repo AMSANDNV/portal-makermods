@@ -5,7 +5,7 @@
 The voice agent's own connection (`PolicyLink`) calls `TaskControl`'s RPCs on a real Operator, with a fake
 robot holding the control gate and a fake teleoperator in the room: the spoken flow "put the blue cube in the
 box", "continue", "wait, the red cube instead", "continue", "teleop", "back to Dream-1", "stop", "continue",
-"park the arms", without the speech, the LLM, or Dream-1 inference in between.
+"home the arms", "continue", "park the arms", without the speech, the LLM, or Dream-1 inference in between.
 """
 import asyncio
 import os
@@ -110,6 +110,15 @@ async def main() -> int:
                 checks.check(tasks.task == RED, "an empty task is refused and the task kept", str(error))
 
             await call(DREAM_RESUME_RPC)
+            reply = await link.home()
+            await asyncio.sleep(0.3)  # the robot releases control on its next tick
+            status = await call(DREAM_STATUS_RPC)
+            checks.check(reply == "returning the arms home" and not status["driving"]
+                         and human.portal.active_operator() is None,
+                         "'home the arms' sends them home, and Dream-1 no longer drives", f"{reply!r}, {status}")
+            status = await call(DREAM_RESUME_RPC)
+            checks.check(status["driving"], "'continue' after a home hands the arms back to Dream-1", str(status))
+
             reply = await link.park()
             await asyncio.sleep(0.3)  # the robot releases control on its next tick
             status = await call(DREAM_STATUS_RPC)
@@ -118,6 +127,8 @@ async def main() -> int:
                          "'park the arms' parks them, and Dream-1 no longer drives", f"{reply!r}, {status}")
             reply = await link.park()
             checks.check(reply == "already parked", "'park' again never powers parked arms up", repr(reply))
+            reply = await link.home()
+            checks.check(reply.startswith("parked"), "'home' on parked arms never powers them up", repr(reply))
         finally:
             await link.close()
             await human.close()

@@ -34,7 +34,7 @@ from livekit.portal.recording import RrdSink
 
 from types import SimpleNamespace
 
-from utils.common import PARK_ONLY, PARK_RPC, RECORDER_IDENTITY, mint_token, pace
+from utils.common import HOME_RPC, PARK_ONLY, PARK_RPC, RECORDER_IDENTITY, mint_token, pace
 from robot import ParkRequests
 from teleoperator import View
 from test._harness import (
@@ -81,7 +81,8 @@ class Impairment:
 class FakeRobot:
     """Publishes tick-stamped state and frames; records what it receives.
 
-    It answers the park RPC with the robot's own bookkeeping; its arms park and power up in one tick.
+    It answers the park and home RPCs with the robot's own bookkeeping; its arms park, power up, and go home in one
+    tick.
     """
 
     def __init__(self, room: str, url: str, fps: int = 30, identity: str = "robot",
@@ -105,14 +106,18 @@ class FakeRobot:
         self.portal.on_action(self._on_action)
         self.portal.on_active_operator_changed(self.gate_changes.append)
         self.portal.register_rpc_method(PARK_RPC, lambda data: self.parking.ask(data.caller_identity, data.payload))
+        self.portal.register_rpc_method(HOME_RPC, lambda data: self.parking.home(data.caller_identity))
 
     def _on_action(self, action: Action) -> None:
         self.actions_received.append({k: float(v) for k, v in action.values.items()})
 
     async def _park_or_power_up(self) -> None:
-        """What robot.py's loop does with a park request, minus the arms."""
+        """What robot.py's loop does with a park or home request, minus the arms."""
         if request := self.parking.take():
-            if not (self.arms.parked and request[1] == PARK_ONLY):
+            if request[1] == ParkRequests.HOME:
+                if not self.arms.parked:
+                    await self.portal.set_active_operator(None)
+            elif not (self.arms.parked and request[1] == PARK_ONLY):
                 if not self.arms.parked:
                     await self.portal.set_active_operator(None)
                 self.arms.parked = not self.arms.parked

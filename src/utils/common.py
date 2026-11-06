@@ -28,6 +28,7 @@ RECORDER_IDENTITY = "recorder"
 PARK_RPC = "park"  # `p` in any operator: the robot parks the arms, or powers parked arms up
 PARK_TOGGLE = ""  # PARK_RPC payload for `p`: park, or power up parked arms
 PARK_ONLY = "park"  # PARK_RPC payload that only parks: never powers up, and parked arms stay as they are
+HOME_RPC = "home"  # the robot walks the powered arms back to rest and holds them there: never parks or powers up
 
 # The task-switching Dream-1 (`uv run dream-1-tasks`) answers these; the voice agent calls them.
 # Each takes and returns JSON; every reply is the status (see src/policies/dream_1_tasks/run.py).
@@ -37,6 +38,12 @@ DREAM_SET_TASK_RPC = "dream.set_task"  # {"task": "put the red cube in the box"}
 DREAM_PAUSE_RPC = "dream.pause"  # Dream-1 releases control; the arms hold
 DREAM_RESUME_RPC = "dream.resume"  # Dream-1 takes control, starting a new episode on the current task
 DREAM_TO_TELEOP_RPC = "dream.to_teleop"  # control passes to the teleoperator's leader arms
+
+# The task monitor (`uv run task-monitor`) watches dream-1-tasks drive and calls this on the voice agent with its
+# report as JSON, every few seconds and at once on a verdict (see src/task_monitor.py).
+VOICE_AGENT_IDENTITY = "voice-agent"
+MONITOR_IDENTITY = "task-monitor"
+MONITOR_REPORT_RPC = "monitor.report"
 
 
 async def request_park(op, who: str) -> None:

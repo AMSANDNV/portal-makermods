@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 # `uv run robot`, `uv run teleoperator`, `uv run recorder`, `uv run dream-1`, `uv run dream-1-tasks`, `uv run act`,
-# and `uv run --group voice voice-agent`
+# `uv run --group voice voice-agent`, and `uv run --group monitor task-monitor`
 [project.scripts]
 robot = "robot:run"
 teleoperator = "teleoperator:run"
@@ -26,6 +26,7 @@ dream-1-tasks = "policies.dream_1_tasks.run:run"
 act = "policies.act.run:run"
 voice-agent = "voice_agent:run"
 hand-teleop = "hand_teleop:run"
+task-monitor = "task_monitor:run"
 
 [build-system]
 requires = ["setuptools>=69"]
@@ -33,7 +34,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-py-modules = ["robot", "teleoperator", "recorder", "voice_agent", "hand_teleop"]
+py-modules = ["robot", "teleoperator", "recorder", "voice_agent", "hand_teleop", "task_monitor"]
 packages = ["utils", "policies", "policies.act", "policies.dream_1", "policies.dream_1_tasks"]
 
 [dependency-groups]
@@ -43,3 +44,5 @@ train = ["lerobot[training]>=0.6.1"]
 voice = ["livekit-agents~=1.8", "livekit-plugins-ai-coustics~=0.3"]
 # Webcam hand tracking for `uv run --group hands hand-teleop`.
 hands = ["mediapipe>=1.2"]
+# The task monitor (`uv run --group monitor task-monitor`): LeRobot's TOPReward, which loads a Qwen3-VL model.
+monitor = ["lerobot[topreward]>=0.6.1"]

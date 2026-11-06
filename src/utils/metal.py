@@ -222,18 +222,24 @@ class Followers:
             if all(name in target and name in self.limiter.present for name in fields):  # never before a read
                 arm.command([target[name] for name in fields])
 
-    def park(self, fps: int) -> None:
-        """Walk both arms back to where they were opened, switch them off, and reopen them read-only.
+    def go_home(self, fps: int) -> None:
+        """Walk both arms back to where they were opened and hold them there, powered. Grippers stay as they are.
 
-        Blocking: run it on the hardware thread. Raises, leaving the arms holding, if an arm is
-        unreadable, blocked (more than PARK_LAG_RAD behind), or short of its rest pose.
+        Blocking: run it on the hardware thread. Raises, leaving the arms holding, if they are parked,
+        an arm is unreadable, blocked (more than PARK_LAG_RAD behind), or short of its rest pose.
         """
         if self.parked:
-            return
+            raise RuntimeError("parked: the arms are off at rest")
+        try:
+            self._walk_to_rest(fps)
+        finally:
+            self.limiter.present.clear()  # the arms moved under the limiter: never command before a fresh read
+
+    def _walk_to_rest(self, fps: int) -> None:
         step = math.radians(env_float("METAL_PARK_DEG_S", 10.0)) / fps
         present = {side: arm.read() for side, arm in self.arms.items()}
         if any(value is None for value in present.values()):
-            raise RuntimeError("an arm is unreadable; not parking")
+            raise RuntimeError("an arm is unreadable; not moving")
         target = {side: value[:6] for side, value in present.items()}
         settled = 0
         while settled < fps:  # one second at rest after the targets arrive
@@ -247,14 +253,23 @@ class Followers:
                     continue
                 if (lag := max(abs(t - q) for t, q in zip(target[side], reading[:6]))) > PARK_LAG_RAD:
                     arm.command(reading)
-                    raise RuntimeError(f"{side} arm is {math.degrees(lag):.0f} deg behind its park target "
-                                       "(blocked?); holding where it is")
+                    raise RuntimeError(f"{side} arm is {math.degrees(lag):.0f} deg behind its target on the way "
+                                       "to rest (blocked?); holding where it is")
             settled = settled + 1 if arrived else 0
             time.sleep(max(0.0, 1 / fps - (time.monotonic() - started)))
         for side, arm in self.arms.items():
             reading = arm.read()
             if reading is None or max(abs(r - q) for r, q in zip(arm.rest, reading[:6])) > PARK_TOL_RAD:
                 raise RuntimeError(f"{side} arm did not reach its rest pose; holding where it is")
+
+    def park(self, fps: int) -> None:
+        """Walk both arms home, switch them off, and reopen them read-only.
+
+        Blocking: run it on the hardware thread. Raises, leaving the arms holding, wherever `go_home()` does.
+        """
+        if self.parked:
+            return
+        self.go_home(fps)
         for arm in self.arms.values():
             arm.switch_off()
         self.parked = True

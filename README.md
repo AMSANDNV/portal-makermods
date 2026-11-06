@@ -14,12 +14,14 @@ Follow these chapters in order:
 To collect human-only demonstrations instead, see the
 [alternative recording path](tutorial/09-reference.md#human-only-demonstrations).
 To steer Dream-1 by voice (change its task, pause and resume it, hand the arms
-to the leaders, and park them), see [chapter 10](tutorial/10-voice-tasks.md).
+to the leaders, send them home, and park them), see [chapter 10](tutorial/10-voice-tasks.md). To have
+a task monitor pause Dream-1 when its task is done or stuck, and tell you by voice, see
+[chapter 12](tutorial/12-task-monitor.md).
 
 You need two Metal leaders, two Metal followers, three USB cameras, Linux hardware
 hosts, Python 3.12, `uv`, and a LiveKit server. ACT training also needs a CUDA
-machine. Dream-1 needs a Dream Labs API key, and the voice agent a LiveKit Cloud
-project for LiveKit Inference.
+machine. Dream-1 needs a Dream Labs API key, the voice agent a LiveKit Cloud
+project for LiveKit Inference, and the task monitor a GPU for its vision-language model.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="tutorial/images/hitl-loop-dark.svg">
@@ -44,12 +46,14 @@ Read these after completing the walkthrough, or when you need to change the code
 | [08. Handoff](tutorial/08-handoff.md) | Switch between human and policy |
 | [09. Reference](tutorial/09-reference.md) | Settings, alternatives, and troubleshooting |
 | [10. Voice](tutorial/10-voice-tasks.md) | Change Dream-1's task and who drives by talking |
+| [12. Task monitor](tutorial/12-task-monitor.md) | Pause Dream-1 when its task is done or stuck, and say how it is going |
 
 **Metal arms have no brakes.** Start the robot with the followers resting: that is
 where they park. `p` parks them (walk back, switch off) or powers them up, and the
 robot parks before every exit. A fault never switches the motors off.
 
 The runnable peers are in `src/`; policies are in `src/policies/`; the voice
-agent is [`src/voice_agent.py`](src/voice_agent.py).
+agent is [`src/voice_agent.py`](src/voice_agent.py) and the task monitor
+[`src/task_monitor.py`](src/task_monitor.py).
 All peers share [`portal.yaml`](portal.yaml).
 For checks without hardware, see [test/README.md](test/README.md).

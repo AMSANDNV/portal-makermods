@@ -98,9 +98,17 @@ payload `"park"` only parks: on parked arms it does nothing, and it cancels a
 toggle still waiting, so it can never power the arms up. The voice agent's "park
 the arms" sends it. Powering up stays a `p` press.
 
-A park stops, and the arms keep holding under power, if an arm is unreadable,
-falls more than 10° behind its target (blocked), or ends more than 3° from its
-rest pose. A fault never switches the motors off.
+A `home` RPC to the robot (any payload) walks the arms back to that pose the
+same way but does not park: they stay powered, holding there, grippers as they
+were. It releases control first, so nothing drives until an operator is
+selected again with `c`. On parked arms it does nothing, and it gives way to a
+park or power-up already waiting, which ends at rest too. Its reply says which
+happens: `"returning the arms home"`, or the park or power-up under way. The
+voice agent's "home the arms" or "reset the arms" sends it.
+
+A park or a return home stops, and the arms keep holding under power, if an arm
+is unreadable, falls more than 10° behind its target (blocked), or ends more
+than 3° from its rest pose. A fault never switches the motors off.
 
 ## Training alternatives
 
@@ -139,7 +147,7 @@ shell values. Relative output paths use the working directory.
 | `METAL_GRIPPER_HOLD_NM` | `0.5` | the gripper's holding torque on an object, N.m |
 | `METAL_FOLLOWER_LEFT_CAN`, `METAL_FOLLOWER_RIGHT_CAN` | required on the robot host | serial path or SocketCAN link per arm |
 | `METAL_LEADER_LEFT_CAN`, `METAL_LEADER_RIGHT_CAN` | required on the teleop host | serial path or SocketCAN link per arm |
-| `METAL_PARK_DEG_S` | `10` | joint speed while parking |
+| `METAL_PARK_DEG_S` | `10` | joint speed while parking or returning home |
 | `METAL_CAM_OVERHEAD`, `METAL_CAM_LEFT_WRIST`, `METAL_CAM_RIGHT_WRIST` | `/dev/video0`, `/dev/video2`, `/dev/video4` | Linux camera device path. |
 | `METAL_CAM_WIDTH` / `_HEIGHT` | `640` / `480` | a 16:9 mode such as 1280x720 suits Dream-1 better; it center-crops otherwise |
 | `METAL_MAX_STEP_RAD` | `0.087` | maximum joint target step per command (about 5°); `0` disables the limit |
@@ -171,6 +179,22 @@ a joint. Every command is also clamped to the soft limits.
 | `VOICE_TTS`, `VOICE_TTS_VOICE` | `fishaudio/s2.1-pro`, the starter's voice | [text-to-speech](https://docs.livekit.io/agents/models/tts/) model and voice |
 
 The defaults are [agent-starter-python](https://github.com/livekit-examples/agent-starter-python)'s.
+
+### Task monitor
+
+| Variable | Default | Notes |
+|---|---|---|
+| `MONITOR_VLM` | `Qwen/Qwen3-VL-8B-Instruct` | the Qwen3-VL model TOPReward asks; `Qwen/Qwen3-VL-4B-Instruct` or `-2B-` on smaller GPUs |
+| `MONITOR_DEVICE` | CUDA, else Apple's MPS, else the CPU | where the model runs |
+| `MONITOR_CAMERA` | `overhead_camera` | the `portal.yaml` video it watches |
+| `MONITOR_SUCCESS` | `0.85` | done: every score at or above this ... |
+| `MONITOR_SUCCESS_HOLD_S` | `10` | ... for this many seconds; Dream-1 keeps driving meanwhile |
+| `MONITOR_STUCK_S`, `MONITOR_GAIN` | `45`, `0.05` | stuck: the estimate has not risen by the gain in this many seconds |
+| `MONITOR_STILL_S` | `15` | stuck: the arms have not moved in this many seconds |
+| `MONITOR_EVERY_S` | `2` | seconds between scores, when the model keeps up |
+
+Calibrate `MONITOR_SUCCESS` with `uv run --group monitor task-monitor --dry-run`; see
+[chapter 12](12-task-monitor.md#3-calibrate-with-a-dry-run).
 
 ### Training
 
@@ -217,6 +241,8 @@ CUDA/MPS/CPU automatically, and waits for the `c` handoff before producing actio
   cameras publish.
 - **The voice agent cannot reach Dream-1 or its models.** See
   [chapter 10](10-voice-tasks.md#troubleshooting).
+- **The task monitor judges too early, too late, or not at all.** See
+  [chapter 12](12-task-monitor.md#troubleshooting).
 - **ACT sees no observations.** Every camera the checkpoint uses must publish.
 - **Low frame rate.** Compare device and tick times in the robot's 5 s line, and
   lower the rate or camera resolution if the hardware cannot keep up.
