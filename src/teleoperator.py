@@ -19,7 +19,7 @@ from utils.common import (CONFIG_PATH, TELEOPERATOR_IDENTITY, HardwareThread, en
 from livekit.portal import Operator, OperatorConfig, VideoFrameData, frame_bytes_to_numpy_rgb
 from utils.hotkeys import Hotkeys, input_backend_warning
 from utils.metal import build_leaders
-from utils.rerun_view import Preview
+from utils.rerun_view import TELEOPERATOR_VIEWER_PORT, Preview
 from utils.session import prompt_tasks
 
 # The keypoint types `livekit-portal convert` cuts episodes at by default.
@@ -135,7 +135,7 @@ async def main() -> None:
     leaders = build_leaders()
     op = Operator(cfg)
     hardware = HardwareThread("leaders")
-    preview = Preview(room, cameras)
+    preview = Preview(room, cameras, port=TELEOPERATOR_VIEWER_PORT)
     view = View(cameras)
 
     def on_video_frame(name: str, frame: VideoFrameData) -> None:

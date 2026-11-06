@@ -134,6 +134,7 @@ because the others wait for its clock.
 To watch the room from any machine with the repository and `.env`, run
 `uv run recorder --observe-only`. It opens a Rerun window with the cameras,
 both arms' joints, the actions, and connection metrics, and writes nothing.
+Each program opens a window of its own, so this can run beside an operator on the same machine.
 
 ## 6. Check human control
 

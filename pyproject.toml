@@ -25,6 +25,7 @@ dream-1 = "policies.dream_1.run:run"
 dream-1-tasks = "policies.dream_1_tasks.run:run"
 act = "policies.act.run:run"
 voice-agent = "voice_agent:run"
+hand-teleop = "hand_teleop:run"
 
 [build-system]
 requires = ["setuptools>=69"]
@@ -32,7 +33,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-py-modules = ["robot", "teleoperator", "recorder", "voice_agent"]
+py-modules = ["robot", "teleoperator", "recorder", "voice_agent", "hand_teleop"]
 packages = ["utils", "policies", "policies.act", "policies.dream_1", "policies.dream_1_tasks"]
 
 [dependency-groups]
@@ -40,3 +41,5 @@ packages = ["utils", "policies", "policies.act", "policies.dream_1", "policies.d
 train = ["lerobot[training]>=0.6.1"]
 # The voice agent (`uv run --group voice voice-agent`): LiveKit Agents and its ai-coustics noise cancellation.
 voice = ["livekit-agents~=1.8", "livekit-plugins-ai-coustics~=0.3"]
+# Webcam hand tracking for `uv run --group hands hand-teleop`.
+hands = ["mediapipe>=1.2"]

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from teleoperator import Tally, View, cycle_active_operator, select_task
-from utils.rerun_view import Preview
+from utils.rerun_view import TELEOPERATOR_VIEWER_PORT, Preview
 from test._harness import Checks
 
 
@@ -156,7 +156,7 @@ def check_session(c: Checks) -> None:
 
 
 def check_preview(c: Checks) -> None:
-    preview = Preview("selftest", ["overhead_camera"])
+    preview = Preview("selftest", ["overhead_camera"], port=TELEOPERATOR_VIEWER_PORT)
     preview.show("overhead_camera", np.zeros((48, 64, 3), np.uint8))
     preview.show_task(["only one"], 0)
     preview.show_task(["a", "b"], 1)

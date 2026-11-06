@@ -2,6 +2,10 @@
 
 Everything is logged `static=True`, so the viewer keeps only the latest frame
 and memory stays flat over a long session. The recorder keeps the history.
+
+Each program spawns its viewer on a port of its own, so it gets a window of its own. `spawn()` on a
+port where a viewer already listens streams into that window instead, and the newest stream takes it
+over: its layout replaces the window's, and with the panels collapsed the other recording is hidden.
 """
 from __future__ import annotations
 
@@ -14,12 +18,16 @@ import rerun.blueprint as rrb
 
 logger = logging.getLogger(__name__)
 
+OBSERVER_VIEWER_PORT = 9876  # `recorder --observe-only`; Rerun's default
+TELEOPERATOR_VIEWER_PORT = 9877
+HAND_TELEOP_VIEWER_PORT = 9878
+
 
 class Preview:
-    def __init__(self, room: str, cameras: Sequence[str]) -> None:
+    def __init__(self, room: str, cameras: Sequence[str], *, port: int) -> None:
         self._stream: Optional[rr.RecordingStream] = rr.RecordingStream(f"portal-makermods-{room}")
         try:
-            self._stream.spawn()
+            self._stream.spawn(port=port)
             self._stream.send_blueprint(rrb.Blueprint(
                 rrb.Vertical(
                     rrb.Horizontal(*(

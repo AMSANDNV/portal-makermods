@@ -16,6 +16,7 @@ import argparse
 import asyncio
 
 from utils.common import CONFIG_PATH, RECORDER_IDENTITY, env_int, env_str, load_env, mint_token, required_env
+from utils.rerun_view import OBSERVER_VIEWER_PORT
 from livekit.portal import Observer, ObserverConfig
 from livekit.portal.recording import RrdSink
 import numpy as np
@@ -61,7 +62,7 @@ class LiveSink(RrdSink):
 
     def open(self, session) -> None:
         self._rec = rr.RecordingStream("livekit-portal", recording_id=session.session)
-        self._rec.spawn(memory_limit="25%")  # the viewer drops the oldest data past this
+        self._rec.spawn(port=OBSERVER_VIEWER_PORT, memory_limit="25%")  # the viewer drops the oldest data past this
         self._rec.send_blueprint(layout(session))
         self._now_us = session.now_us
 
