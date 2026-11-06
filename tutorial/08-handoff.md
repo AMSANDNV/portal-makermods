@@ -25,9 +25,10 @@ The call is an RPC to the robot. If it fails, teleop reports the error; press
 `c` again to retry. Neither operator claims control automatically.
 
 `uv run dream-1-tasks` ([chapter 10](10-voice-tasks.md)) makes the same call when
-asked: its `dream.pause`, `dream.resume`, `dream.to_teleop`, and
-`dream.to_hand_teleop` RPCs, which the voice agent calls, release control, take
-it, or pass it to `teleoperator` or `hand-teleop`.
+asked: its `dream.pause`, `dream.resume`, `dream.to_teleop`,
+`dream.to_hand_teleop`, and `dream.stop_hand_teleop` RPCs, which the voice agent
+calls, release control, take it, pass it to `teleoperator` or `hand-teleop`, or
+take it from `hand-teleop` and leave no operator active.
 
 ## 2. Keep recording across handoffs
 

@@ -27,12 +27,12 @@ uv run --group voice python -m test.test_monitor_voice
 | `test_teleop` | Control cycling, frame anchors, task selection, keyboard input, preview |
 | `test_resilience` | Per-arm CAN failure recovery, both-arms-or-nothing state, target-step and soft limits, park and home requests |
 | `test_dream1` | Dream-1 embodiment, camera roles, frame encoding, unit mapping, chunk layout |
-| `test_dream1_tasks` | A task change pauses first and never starts motion; pause, resume, teleop and hand-teleop handoff; task sources |
+| `test_dream1_tasks` | A task change pauses first and never starts motion; pause, resume, teleop and hand-teleop handoff, hand teleop off; task sources |
 | `test_pubsub` | Discovery, control gate, observation transport |
 | `test_recorder` | Episode markers and frame/state/action alignment after an archive round trip |
 | `test_handoff` | Human → policy → human actions recorded in one episode |
 | `test_degraded` | Alignment under jitter, drops, and stalls |
-| `test_voice_tasks` | The voice agent's RPCs to a real operator: task, pause, resume, teleop and hand-teleop handoff, home, park, stop words |
+| `test_voice_tasks` | The voice agent's RPCs to a real operator: task, pause, resume, teleop and hand-teleop handoff, hand teleop off, home, park, stop words |
 | `test_task_monitor` | The monitor's clip, the wait before done, stuck verdicts, release of control, dry run, handover; a stub model |
 | `test_monitor_voice` | The monitor over a real server: a run done, one stuck, one handed over; the voice agent's reports and announcements, and the newest report in every LLM call |
 

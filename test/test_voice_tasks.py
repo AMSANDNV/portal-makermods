@@ -5,8 +5,9 @@
 The voice agent's own connection (`PolicyLink`) calls `TaskControl`'s RPCs on a real Operator, with a fake
 robot holding the control gate, a fake teleoperator, and a fake hand teleop in the room: the spoken flow "put the
 blue cube in the box", "continue", "wait, the red cube instead", "continue", "teleop", "back to Dream-1", "hand
-teleop", "stop", "back to Dream-1", "stop", "continue", "home the arms", "continue", "park the arms", without the
-speech, the LLM, or Dream-1 inference in between.
+teleop", "stop", "back to Dream-1", "disable hand teleop" (nothing to disable), "hand teleop", "disable hand teleop",
+"continue", "stop", "continue", "home the arms", "continue", "park the arms", without the speech, the LLM, or
+Dream-1 inference in between.
 """
 import asyncio
 import os
@@ -17,9 +18,9 @@ from policies.dream_1_tasks.run import TaskControl
 from test._harness import Checks, RobotProcess, fresh_room
 from test.fake_peers import FakeOperator
 from utils.common import (DREAM_PAUSE_RPC, DREAM_RESUME_RPC, DREAM_SET_TASK_RPC, DREAM_STATUS_RPC,
-                          DREAM_TASKS_IDENTITY, DREAM_TO_HAND_TELEOP_RPC, DREAM_TO_TELEOP_RPC, HAND_TELEOP_IDENTITY,
-                          TELEOPERATOR_IDENTITY)
-from voice_agent import STOP_WORDS, PolicyLink, describe
+                          DREAM_STOP_HAND_TELEOP_RPC, DREAM_TASKS_IDENTITY, DREAM_TO_HAND_TELEOP_RPC,
+                          DREAM_TO_TELEOP_RPC, HAND_TELEOP_IDENTITY, TELEOPERATOR_IDENTITY)
+from voice_agent import STOP_WORDS, PolicyLink, describe, hand_teleop_stopped
 
 BLUE, RED = "put the blue cube in the box", "put the red cube in the box"
 
@@ -129,6 +130,24 @@ async def main() -> int:
             status = await call(DREAM_RESUME_RPC)
             checks.check(status["driving"] and hands.portal.active_operator() == DREAM_TASKS_IDENTITY,
                          "'back to Dream-1' takes control from the hand teleop", str(status))
+
+            status = await call(DREAM_STOP_HAND_TELEOP_RPC)
+            checks.check(status["driving"] and hands.portal.active_operator() == DREAM_TASKS_IDENTITY,
+                         "'disable hand teleop' leaves Dream-1 driving", str(status))
+            checks.check("nothing changed" in hand_teleop_stopped(status), "the agent says nothing changed",
+                         hand_teleop_stopped(status))
+
+            await call(DREAM_TO_HAND_TELEOP_RPC)
+            status = await call(DREAM_STOP_HAND_TELEOP_RPC)
+            checks.check(status["active_operator"] is None and not status["driving"]
+                         and hands.portal.active_operator() is None and human.portal.active_operator() is None,
+                         "'disable hand teleop' leaves no operator active", str(status))
+            checks.check("nobody does" in hand_teleop_stopped(status), "the agent says nobody drives",
+                         hand_teleop_stopped(status))
+
+            status = await call(DREAM_RESUME_RPC)
+            checks.check(status["driving"], "'continue' after disabling hand teleop hands the arms to Dream-1",
+                         str(status))
 
             status = await call(DREAM_PAUSE_RPC)
             checks.check(not status["driving"] and human.portal.active_operator() is None, "'stop' pauses Dream-1",

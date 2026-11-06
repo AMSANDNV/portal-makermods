@@ -108,6 +108,17 @@ class TaskControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.op.active, status["hand_teleop"], status["hand_teleop_connected"]),
                          ("hands-2", "hands-2", True))
 
+    async def test_stopping_the_hand_teleop_leaves_nobody_driving(self):
+        tasks = self.control(active=HAND_TELEOP_IDENTITY, others=(TELEOPERATOR_IDENTITY, HAND_TELEOP_IDENTITY))
+        status = await tasks.stop_hand_teleop("voice-agent")
+        self.assertEqual((self.op.active, status["active_operator"], status["driving"]), (None, None, False))
+
+    async def test_stopping_the_hand_teleop_leaves_everyone_else_alone(self):
+        for active in (ME, TELEOPERATOR_IDENTITY, None):
+            tasks = self.control(active=active, others=(TELEOPERATOR_IDENTITY, HAND_TELEOP_IDENTITY))
+            status = await tasks.stop_hand_teleop("voice-agent")
+            self.assertEqual((self.op.active, status["active_operator"]), (active, active))
+
     async def test_task_text_is_tidied_and_bounded(self):
         tasks = self.control()
         self.assertEqual((await tasks.set_task("  put the red\n cube  in the box ", "t"))["task"], RED)

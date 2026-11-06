@@ -5,13 +5,14 @@
 
 Say a task to change Dream-1's prompt, "stop" and "continue" to pause and resume it, "teleop" to hand the arms
 to the person on the leader arms, "hand teleop" to hand them to the webcam hand teleop (`uv run hand-teleop`,
-tutorial/11-hand-teleop.md), "home" or "reset the arms" to walk them back to rest and hold them there, and "park"
-to park them. Ask "how is it going?" for the task monitor's estimate (`uv run task-monitor`,
-tutorial/12-task-monitor.md): it reports here as Dream-1 works, and the agent tells you when the monitor judges the
-task done or stuck and pauses Dream-1. The agent is not a Portal peer and never drives: it joins the robot's room as
-`voice-agent` and calls the RPCs `uv run dream-1-tasks` answers (src/utils/common.py names them), and the robot's
-own home and park. Home keeps the arms powered; park only parks: powering up stays a `p` key. The conversation
-happens on this computer (console) or in a room of its own, never the robot's, whose peers are not people.
+tutorial/11-hand-teleop.md) and "disable hand teleop" to take them back from it, leaving nobody driving, "home" or
+"reset the arms" to walk them back to rest and hold them there, and "park" to park them. Ask "how is it going?" for
+the task monitor's estimate (`uv run task-monitor`, tutorial/12-task-monitor.md): it reports here as Dream-1
+works, and the agent tells you when the monitor judges the task done or stuck and pauses Dream-1. The agent is not
+a Portal peer and never drives: it joins the robot's room as `voice-agent` and calls the RPCs `uv run
+dream-1-tasks` answers (src/utils/common.py names them), and the robot's own home and park. Home keeps the arms
+powered; park only parks: powering up stays a `p` key. The conversation happens on this computer (console) or in a
+room of its own, never the robot's, whose peers are not people.
 
 The voice pipeline is the starter's (github.com/livekit-examples/agent-starter-python): LiveKit Inference for
 speech-to-text, the LLM, and text-to-speech, the LiveKit turn detector, and ai-coustics noise cancellation.
@@ -36,9 +37,10 @@ from livekit.agents.llm.chat_context import DYNAMIC_INSTRUCTIONS_MESSAGE_ID
 from livekit.plugins import ai_coustics
 
 from utils.common import (DREAM_PAUSE_RPC, DREAM_RESUME_RPC, DREAM_SET_TASK_RPC, DREAM_STATUS_RPC,
-                          DREAM_TASKS_IDENTITY, DREAM_TO_HAND_TELEOP_RPC, DREAM_TO_TELEOP_RPC, HAND_TELEOP_IDENTITY,
-                          HOME_RPC, MONITOR_REPORT_RPC, PARK_ONLY, PARK_RPC, ROBOT_IDENTITY, TELEOPERATOR_IDENTITY,
-                          VOICE_AGENT_IDENTITY, env_str, load_env, mint_token, required_env)
+                          DREAM_STOP_HAND_TELEOP_RPC, DREAM_TASKS_IDENTITY, DREAM_TO_HAND_TELEOP_RPC,
+                          DREAM_TO_TELEOP_RPC, HAND_TELEOP_IDENTITY, HOME_RPC, MONITOR_REPORT_RPC, PARK_ONLY, PARK_RPC,
+                          ROBOT_IDENTITY, TELEOPERATOR_IDENTITY, VOICE_AGENT_IDENTITY, env_str, load_env, mint_token,
+                          required_env)
 
 logger = logging.getLogger("voice-agent")
 
@@ -55,7 +57,8 @@ INSTRUCTIONS = textwrap.dedent("""\
     task instruction, such as "put the blue cube in the box". A person can drive them instead, in one of two ways:
     the teleoperator moves two leader arms, and the hand teleop follows the person's hands in front of a webcam.
     You change Dream-1's task, pause and resume it, switch control between Dream-1, the teleoperator, and the hand
-    teleop, send the arms home, and park them. You cannot see the robot: you know only what your tools return.
+    teleop, turn the hand teleop off, send the arms home, and park them. You cannot see the robot: you know only
+    what your tools return.
 
     # Output rules
 
@@ -71,12 +74,16 @@ INSTRUCTIONS = textwrap.dedent("""\
     - The user gives a task: call change_task with a short imperative instruction, such as "put the red cube in
       the box". Use a preset's exact words when the user means one ("the second one" is preset two). A task change
       pauses Dream-1; then ask the user to say "continue" to resume, unless they already said to go.
-    - Stop, wait, hold on, pause: call pause.
+    - Stop, wait, hold on, pause: call pause. When the user names the hand teleop, follow the hand teleop rule
+      below instead.
     - Continue, go, resume, start, or "back to Dream-1": call resume. Never resume unless the user asks for it.
     - Teleop, leader arms, manual, "I'll take over", "give me control": call switch_to_teleop. If the leader-arm
       teleoperator is not connected but the hand teleop is, ask whether to use hand teleop instead.
     - Hand teleop, hand control, "my hands", "use the webcam", "hand tracking": call switch_to_hand_teleop. Each arm
       then holds still until a hand grips it.
+    - Disable, stop, end, or turn off hand teleop, "hands off", "stop following my hands": call stop_hand_teleop.
+      It takes control from the hand teleop and leaves nobody driving: the arms hold still until the user says
+      continue or teleop. It never stops Dream-1 or the leader arms.
     - Home, "home the arms", "reset the arms", "reset", "back to the start position", "return to rest": call
       home_arms. It walks both arms back to their rest pose, whoever is driving, and keeps them powered there;
       nobody drives afterwards until the user says continue or teleop. It is not a park: never call park_arms to
@@ -119,6 +126,20 @@ def describe(status: dict) -> str:
     presets = "; ".join(f"{n}. {task}" for n, task in enumerate(status.get("presets", []), start=1))
     return (f"Task: {status.get('task')!r}. {state}. The leader-arm teleoperator is {teleop}; the hand teleop is "
             f"{hands}. Preset tasks: {presets}.")
+
+
+def hand_teleop_stopped(status: dict) -> str:
+    """The reply to "disable hand teleop", from the status Dream-1 answers with after it."""
+    who = status.get("active_operator")
+    if who is None:
+        after = (" The hand teleop no longer drives: nobody does, and the arms hold still. Ask whether to continue "
+                 "with Dream-1 or switch to teleop.")
+    elif who == status.get("hand_teleop", HAND_TELEOP_IDENTITY):
+        after = (" The hand teleop still drives: control did not change. Tell the user to press c in the hand teleop "
+                 "terminal to release it.")
+    else:
+        after = " The hand teleop was not driving, so nothing changed."
+    return describe(status) + after
 
 
 def describe_report(report: dict | None, age_s: float = 0.0) -> str:
@@ -282,6 +303,12 @@ class VoiceControl(Agent):
         stops driving. Not the leader arms: that is switch_to_teleop."""
         status = describe(await self.link.call(DREAM_TO_HAND_TELEOP_RPC))
         return status + " Remind the user that each arm holds still until a hand grips it."
+
+    @function_tool
+    async def stop_hand_teleop(self, context: RunContext) -> str:
+        """Turn the hand teleop off: take control from it, so no operator drives and the arms hold still where they
+        are. Dream-1 or the leader arms, if one of them drives, are left alone."""
+        return hand_teleop_stopped(await self.link.call(DREAM_STOP_HAND_TELEOP_RPC))
 
     @function_tool
     async def home_arms(self, context: RunContext) -> str:

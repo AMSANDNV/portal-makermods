@@ -16,6 +16,7 @@ home, and park them, by talking:
 > **You:** Switch to teleop. *(The followers track the leader arms.)*\
 > **You:** Okay, back to Dream-1. *(Dream-1 takes over again.)*\
 > **You:** Hand teleop. *(Your hands in front of the webcam drive the arms; each holds until a hand grips it.)*\
+> **You:** Disable hand teleop. *(Nobody drives; the arms hold where they are.)*\
 > **You:** Reset the arms. *(They walk back to their rest pose and hold there, powered.)*\
 > **You:** Continue. *(Dream-1 starts its task again from the rest pose.)*\
 > **You:** Park the arms. *(They walk back to their rest pose and switch off.)*
@@ -66,6 +67,7 @@ teleop" hands the arms to the leaders. On parked arms it does nothing.
 | `dream.resume` | `{}` | Dream-1 takes control from whoever has it, starting a new episode |
 | `dream.to_teleop` | `{}` | Control passes to `teleoperator`; the followers track the leaders |
 | `dream.to_hand_teleop` | `{}` | Control passes to `hand-teleop` (`HAND_TELEOP_IDENTITY`); each arm holds until a hand grips it |
+| `dream.stop_hand_teleop` | `{}` | If the hand teleop drives, no operator does afterwards and the robot holds the arms; otherwise nothing |
 
 Every reply is the same JSON status: `task`, `presets`, `driving`,
 `active_operator`, `teleoperator_connected`, `hand_teleop` (its identity), and
@@ -132,6 +134,7 @@ The agent greets you with the current task and who is driving. Then:
 | "Stop", "wait", "hold on", "pause" | `dream.pause` |
 | "Switch to teleop", "I'll take over" | `dream.to_teleop` |
 | "Hand teleop", "I'll use my hands" | `dream.to_hand_teleop` |
+| "Disable hand teleop", "turn off hand teleop", "hands off" | `dream.stop_hand_teleop` |
 | "Home the arms", "reset the arms" | the robot's `home` |
 | "Park the arms", "put the arms away" | the robot's `park`, payload `"park"` |
 | "What's happening?", "who's driving?" | `dream.status` |
@@ -143,7 +146,10 @@ pressing `c`: the followers start tracking them at once, within the step limit.
 "Hand teleop" needs no lining up: the arms hold until a hand grips, and each grip
 moves its arm relative to where it is, as in [chapter 11](11-hand-teleop.md).
 Saying just "teleop" means the leaders; if only the hand teleop is connected, the
-agent asks whether you meant it.
+agent asks whether you meant it. "Disable hand teleop" takes control from the hand
+teleop and gives it to no one, like a pause: the arms hold where they are until
+you say "continue" or "teleop". It never stops Dream-1 or the leaders. A plain
+"stop" leaves the hand teleop driving, as it does the leaders.
 
 "Stop", "wait", "hold on", "pause", and "freeze" are matched in the live
 transcript and pause Dream-1 before you finish the sentence. The LLM still reads
@@ -198,9 +204,9 @@ The arms ramp from where they are, as after a handoff.
 AssemblyAI speech-to-text with keyterms (`Dream-1`, `teleop`, `hand teleop`, `park`), Gemma 4 as the
 LLM, Fish Audio speech with expressive mode, the LiveKit turn detector with
 preemptive generation, and ai-coustics noise cancellation on the room's
-microphone. On top of it, `VoiceControl` has eight tools: `status`,
+microphone. On top of it, `VoiceControl` has nine tools: `status`,
 `change_task`, `pause`, `resume`, `switch_to_teleop`, `switch_to_hand_teleop`,
-`home_arms`, and `park_arms`. Each calls
+`stop_hand_teleop`, `home_arms`, and `park_arms`. Each calls
 one RPC through `PolicyLink`, the agent's own connection to the robot's room, and
 returns the result as a sentence, so the agent reports only what happened. The
 fast pause is a `user_input_transcribed` handler that matches stop words in
