@@ -11,15 +11,17 @@ dependencies = [
     "python-dotenv>=1",
     "opencv-python>=4.5",
     "pynput>=1.7",
+    "dreamlabs>=1.0.23",        # the `robots` arm driver and `dreamcli`
+    "dreamlabs-client>=1.0.14",  # the `dream` client (Dream-1)
 ]
-# The arms' driver, `metal_sdk`, is built from source on the robot and
-# operator hosts (it links ROS 2 Humble's KDL): tutorial/01-first-recording.md.
 
-# `uv run robot`, `uv run teleoperator`, `uv run recorder`
+# `uv run robot`, `uv run teleoperator`, `uv run recorder`, `uv run dream-1`, `uv run act`
 [project.scripts]
 robot = "robot:run"
 teleoperator = "teleoperator:run"
 recorder = "recorder:run"
+dream-1 = "policies.dream_1.run:run"
+act = "policies.act.run:run"
 
 [build-system]
 requires = ["setuptools>=69"]
@@ -28,10 +30,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 package-dir = { "" = "src" }
 py-modules = ["robot", "teleoperator", "recorder"]
-packages = ["utils"]
+packages = ["utils", "policies", "policies.act", "policies.dream_1"]
 
 [dependency-groups]
 # Training alone needs no robot, LiveKit connection, or desktop input.
 train = ["lerobot[training]>=0.6.1"]
-# Dream-1 runs remotely; `dreamlabs` carries the client-side IK for the Metal arm.
-dream = ["dreamlabs>=1.0.23", "dreamlabs-client>=1.0.14"]

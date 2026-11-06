@@ -6,29 +6,35 @@ from __future__ import annotations
 
 import math
 import sys
+from types import SimpleNamespace
 
-from utils.metal import LIMITS_RAD, Arm, Followers, Leaders, StepLimiter, arm_fields, clamp_to_limits
+import numpy as np
+
+from utils.metal import GRIPPER_MAX_MM, LIMITS_RAD, Arm, Followers, Leaders, StepLimiter, arm_fields, clamp_to_limits
 from test._harness import Checks
 
-HOME = [0.0, -1.2, 1.5, 0.0, 0.0, 0.0, 40.0]  # inside every soft limit; gripper half open
+HOME = [0.0, -1.2, 1.5, 0.0, 0.0, 0.0, 40.0]  # inside every soft limit; gripper 40 mm
 
 
-class FakeSDK:
-    """Stands in for `MetalSDKInterface` at the calls `Arm` makes."""
+class FakeArm:
+    """Stands in for a `robots.followers.FollowerArm` at the calls `Arm` makes.
+
+    `read()` raises like the driver does on a silent or faulted motor; `write()` records the mm target it was handed.
+    """
 
     def __init__(self):
-        self.fault, self.raises, self.commands = False, False, []
+        self.raises, self.commands = False, []
 
-    def GetJointErrorCode(self):
-        return [1, 2 if self.fault else 1, 1, 1, 1, 1, 1]
-
-    def GetJointPosition(self):
+    def read(self):
         if self.raises:
             raise OSError("CAN read failed")
-        return list(HOME)
+        return SimpleNamespace(positions_rad=np.array(HOME[:6], dtype=np.float64), gripper=HOME[6] / GRIPPER_MAX_MM)
 
-    def SetFollowerArmJointPosition(self, values):
-        self.commands.append(list(values))
+    def write(self, command):
+        self.commands.append([*command.positions_rad, command.gripper * GRIPPER_MAX_MM])
+
+    def close(self):
+        pass
 
 
 class FakeCamera:
@@ -38,7 +44,7 @@ class FakeCamera:
 
 def arm(side):
     a = Arm(side, "can0", leader=False)
-    a._sdk = FakeSDK()
+    a._arm = FakeArm()
     return a
 
 
@@ -54,31 +60,30 @@ def main() -> int:
     c = Checks("robot safety")
 
     a = arm("left")
-    a._sdk.raises = True
+    a._arm.raises = True
     c.check(a.read() is None and a.errors == 1, "a failed read returns None instead of raising")
-    a._sdk.raises, a._sdk.fault = False, True
-    c.check(a.read() is None, "a motor fault code counts as a failed read")
+    c.check(a.read() is None and a.errors == 2, "every failed read counts; a motor fault never ends the loop")
 
     p = pair()
     state, frames = p.get_observation()
     c.check(len(state) == 14 and frames == {"overhead_camera": "frame"}, "both arms read: fourteen values and video")
-    p.arms["right"]._sdk.fault = True
+    p.arms["right"]._arm.raises = True
     state, frames = p.get_observation()
     c.check(state == {} and frames, "one arm unreadable: no state at all, but video keeps flowing")
 
     p = pair()
     p.send_action(action(HOME, HOME))
-    c.check(not p.arms["left"]._sdk.commands, "no command before the first observation")
+    c.check(not p.arms["left"]._arm.commands, "no command before the first observation")
 
     p = pair(step=0.1)
     p.get_observation()
     far = [1.0] + HOME[1:6] + [0.0]  # joint1 a radian away, gripper closed
     p.send_action(action(far, HOME))
-    sent = p.arms["left"]._sdk.commands[-1]
+    sent = p.arms["left"]._arm.commands[-1]
     c.check(math.isclose(sent[0], 0.1), "a far target advances by max_step", str(sent[0]))
     c.check(sent[6] == 0.0, "the gripper is not ramped", str(sent[6]))
     p.send_action(action(far, HOME))
-    c.check(math.isclose(p.arms["left"]._sdk.commands[-1][0], 0.2), "the ramp continues from the last target")
+    c.check(math.isclose(p.arms["left"]._arm.commands[-1][0], 0.2), "the ramp continues from the last target")
 
     limiter = StepLimiter(0.3)
     limiter.present = {"left_joint1.pos": 0.0}
@@ -93,11 +98,12 @@ def main() -> int:
     joints_ok = all(lo <= clamped[f"{s}_joint{i + 1}.pos"] <= hi
                     for s in ("left", "right") for i, (lo, hi) in enumerate(LIMITS_RAD))
     c.check(joints_ok, "every joint lands inside its soft limit")
-    c.check(clamped["left_gripper.pos"] == 80.0 and clamped["right_gripper.pos"] == 0.0, "grippers stay in 0-80 mm")
+    c.check(clamped["left_gripper.pos"] == GRIPPER_MAX_MM and clamped["right_gripper.pos"] == 0.0,
+            "grippers stay in 0-100 mm")
 
     leaders = Leaders({s: arm(s) for s in ("left", "right")})
     c.check(len(leaders.get_action()) == 14, "both leaders read: one fourteen-value action")
-    leaders.arms["left"]._sdk.raises = True
+    leaders.arms["left"]._arm.raises = True
     c.check(leaders.get_action() == {}, "one leader unreadable: no action, never half of one")
     return c.exit_code
 

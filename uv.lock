@@ -1624,6 +1624,8 @@ name = "portal-makermods"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "dreamlabs" },
+    { name = "dreamlabs-client" },
     { name = "lerobot", extra = ["hardware"] },
     { name = "livekit-api" },
     { name = "livekit-portal", extra = ["lerobot", "rerun"] },
@@ -1634,16 +1636,14 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
-dream = [
-    { name = "dreamlabs" },
-    { name = "dreamlabs-client" },
-]
 train = [
     { name = "lerobot", extra = ["training"] },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "dreamlabs", specifier = ">=1.0.23" },
+    { name = "dreamlabs-client", specifier = ">=1.0.14" },
     { name = "lerobot", extras = ["hardware"], specifier = ">=0.6.1" },
     { name = "livekit-api", specifier = ">=0.7" },
     { name = "livekit-portal", extras = ["rerun", "lerobot"], specifier = ">=0.3.0rc2" },
@@ -1654,10 +1654,6 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dream = [
-    { name = "dreamlabs", specifier = ">=1.0.23" },
-    { name = "dreamlabs-client", specifier = ">=1.0.14" },
-]
 train = [{ name = "lerobot", extras = ["training"], specifier = ">=0.6.1" }]
 
 [[package]]

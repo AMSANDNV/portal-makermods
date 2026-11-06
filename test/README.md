@@ -6,7 +6,7 @@ Run from the repo root. ACT checks need the training dependency group:
 uv run --group train python -m unittest test.test_act
 uv run python -m test.test_teleop
 uv run python -m test.test_resilience
-uv run --group dream python -m unittest test.test_dream1
+uv run python -m unittest test.test_dream1
 ```
 
 For transport and archive checks, start `livekit-server --dev` in another

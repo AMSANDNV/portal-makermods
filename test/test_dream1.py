@@ -1,6 +1,6 @@
 """Dream-1 observation and action mapping; no robot, network, or API key.
 
-    uv run --group dream python -m unittest test.test_dream1
+    uv run python -m unittest test.test_dream1
 """
 import base64
 import importlib.util
@@ -12,9 +12,9 @@ import numpy as np
 from livekit.portal import OperatorConfig
 
 from utils.common import CONFIG_PATH, ROOT
-from utils.metal import LIMITS_RAD, arm_fields
+from utils.metal import GRIPPER_MAX_MM, LIMITS_RAD, arm_fields
 
-_spec = importlib.util.spec_from_file_location("dream1", ROOT / "src/policies/dream-1/inference.py")
+_spec = importlib.util.spec_from_file_location("dream1", ROOT / "src/policies/dream_1/run.py")
 dream1 = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dream1)
 
@@ -53,7 +53,7 @@ class Dream1Tests(unittest.TestCase):
             *joints, gripper = arm_fields(side)
             for name, (lo, hi) in zip(joints, LIMITS_RAD):
                 self.assertTrue(lo <= action[name] <= hi, name)
-            self.assertTrue(0.0 <= action[gripper] <= 80.0)
+            self.assertTrue(0.0 <= action[gripper] <= GRIPPER_MAX_MM)
 
     def test_chunk_rows_are_left_then_right(self):
         rows = dream1.chunk_rows({"q_l_chunk": np.zeros((48, 7)), "q_r_chunk": np.ones((48, 7))})

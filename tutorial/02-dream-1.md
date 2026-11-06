@@ -9,8 +9,12 @@ positions, and host configuration.
 
 ## 1. Configure access
 
-On the **robot host**, save your Dream Labs API key in `~/.dreamlabs/credentials`
-using the [Dream Labs setup instructions](https://platform.dreamlabs.ai/api-documentation/).
+On the **robot host**, create an API key at
+[platform.dreamlabs.ai](https://platform.dreamlabs.ai/api-keys) and add it to `.env`:
+
+```dotenv
+DREAM_API_KEY=dl_live_...
+```
 
 Keep the robot, recorder, and teleoperator from chapter 1 running. If you stopped
 them, restart them in that order, in separate terminals. Keep other policies stopped.

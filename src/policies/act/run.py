@@ -138,5 +138,9 @@ async def main() -> None:
             op.close()
 
 
-if __name__ == "__main__":
+def run() -> None:
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run()

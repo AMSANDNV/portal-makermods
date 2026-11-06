@@ -1,11 +1,9 @@
-"""Two MakerMods Metal followers with three cameras, and two Metal leaders.
+"""Two Metal followers with three cameras and two Metal leaders, over Dream's `robots` driver.
 
-Each arm is one `MetalSDKInterface` (github.com/makermods-robotics/metal-python-ros)
-on its own CAN link. It reads and takes seven values: joint1..joint6 in radians,
-then the gripper stroke in mm (0 closed, 80 open). A leader floats in gravity
-compensation; a follower tracks targets. See tutorial/05-robot-loop.md.
-
-Nothing here disables the motors: a Metal arm has no brakes and drops.
+Each arm is one follower on its own CAN link: seven values, joint1..joint6 in radians then the
+gripper (0 closed, GRIPPER_MAX_MM open). Followers are energized (position control with gravity
+feed-forward); leaders open read-only, moved by hand. The arms are brakeless and drop when
+unpowered; nothing here disables them. See tutorial/05-robot-loop.md.
 """
 from __future__ import annotations
 
@@ -13,15 +11,16 @@ import logging
 import math
 import platform
 import time
-from pathlib import Path
+
+import numpy as np
 
 from utils.common import env_camera_id, env_float, env_int, env_str
 
 logger = logging.getLogger(__name__)
 
 SIDES = ("left", "right")
-GRIPPER_MAX_MM = 80.0
-# MakerMods' soft limits for joint1..joint6, degrees.
+GRIPPER_MAX_MM = 100.0  # Dream's grip scale: the driver's gripper 0..1 maps 1.0 to this many mm
+# Soft limits for joint1..joint6, degrees.
 LIMITS_DEG = ((-160, 160), (-180, 0), (0, 180), (-123, 81), (-85, 85), (-145, 145))
 LIMITS_RAD = [(math.radians(lo), math.radians(hi)) for lo, hi in LIMITS_DEG]
 
@@ -42,33 +41,51 @@ def clamp_to_limits(action: dict[str, float]) -> dict[str, float]:
     return out
 
 
-class Arm:
-    """One Metal arm. `read()` returns None instead of raising, so a CAN hiccup never ends the loop."""
+def _gripper_deg(side: str, which: str) -> float:
+    """The gripper motor's angle at the jaws' OPEN or CLOSED end, degrees, measured per arm, from the env."""
+    raw = env_str(f"METAL_{side.upper()}_GRIPPER_{which}_DEG", env_str(f"METAL_GRIPPER_{which}_DEG", ""))
+    if not raw:
+        raise RuntimeError(f"{side} arm: set METAL_GRIPPER_{which}_DEG (see tutorial/01-first-recording.md)")
+    return float(raw)
 
-    def __init__(self, side: str, can_id: str, leader: bool) -> None:
-        self.side, self.can_id, self.leader = side, can_id, leader
+
+def _arm_command(positions_rad: np.ndarray, gripper: float):
+    from robots import types  # lazy: keep `import utils.metal` free of the hardware stack
+
+    return types.ArmCommand(positions_rad=positions_rad, gripper=gripper)
+
+
+class Arm:
+    """One Metal arm over Dream's `robots` follower; `read()` returns None on a hiccup, never raising.
+
+    A follower is energized; a leader opens read-only, moved by hand. The gripper crosses as 0..1, carried as mm.
+    """
+
+    def __init__(self, side: str, can_channel: str, leader: bool) -> None:
+        self.side, self.can_channel, self.leader = side, can_channel, leader
         self.errors = 0
-        self._sdk = None
+        self._arm = None  # robots.followers.FollowerArm
 
     def connect(self) -> None:
         try:
-            from metal_sdk import ControlMode, MetalSDKInterface
+            from robots import config, metal, motor_arm, robstride
         except ImportError as exc:
-            raise RuntimeError("metal_sdk is not installed: see tutorial/01-first-recording.md") from exc
-        urdf = Path(env_str("METAL_URDF", "~/metal-python-ros/metal_sdk/example/urdf/metal_with_gripper.urdf"))
-        # arm_end_type 3: gripper and teaching pendant, as the vendor's launches use.
-        sdk = MetalSDKInterface(can_id=self.can_id, urdf_path=str(urdf.expanduser()), arm_end_type=3, enable_arm=True)
-        if not sdk.Init():
-            raise RuntimeError(f"{self.side} arm: Metal SDK Init() failed on {self.can_id}; is the CAN link up?")
-        sdk.SetArmControlMode(ControlMode.GRAVITY_COMPENSATION if self.leader else ControlMode.RT_JOINT_POSITION)
-        self._sdk = sdk
+            raise RuntimeError("dreamlabs is not installed: run `uv sync` (see tutorial/01-first-recording.md)") from exc
+        cfg = config.ArmConfig(
+            can_channel=self.can_channel,
+            home=(0.0,) * 6,  # the loop reads the real pose; never homes
+            gripper_open_deg=_gripper_deg(self.side, "OPEN"),
+            gripper_closed_deg=_gripper_deg(self.side, "CLOSED"),
+            gripper_hold_torque_nm=env_float("METAL_GRIPPER_HOLD_NM", 0.5),
+        )
+        self._arm = motor_arm.open_arm(
+            metal.ARM, cfg, self.side, opener=robstride.open_can_bus, energize=not self.leader
+        )
 
     def read(self) -> list[float] | None:
         try:
-            # GetJointErrorCode: 0 disabled, 1 enabled, 2 and up a fault.
-            if faults := [code for code in self._sdk.GetJointErrorCode() if code >= 2]:
-                raise RuntimeError(f"motor fault codes {faults}")
-            values = [float(v) for v in self._sdk.GetJointPosition()]
+            state = self._arm.read()
+            values = [float(x) for x in state.positions_rad] + [float(state.gripper) * GRIPPER_MAX_MM]
             if len(values) != 7 or not all(map(math.isfinite, values)):
                 raise RuntimeError(f"bad reading {values}")
             return values
@@ -79,7 +96,13 @@ class Arm:
             return None
 
     def command(self, values: list[float]) -> None:
-        self._sdk.SetFollowerArmJointPosition(values)
+        gripper = min(max(values[6] / GRIPPER_MAX_MM, 0.0), 1.0)
+        self._arm.write(_arm_command(np.asarray(values[:6], dtype=np.float64), gripper))
+
+    def close(self) -> None:
+        """Release the driver without moving the arm (a follower keeps holding its last target)."""
+        if self._arm is not None:
+            self._arm.close()
 
 
 class Camera:
@@ -175,10 +198,12 @@ class Followers:
     def disconnect(self) -> None:
         for camera in self.cameras.values():
             camera._cam.disconnect()
+        for arm in self.arms.values():
+            arm.close()  # never disables the motors
 
 
 class Leaders:
-    """Both leaders in gravity compensation, read as one Portal action."""
+    """Both leaders read-only, moved by hand, read as one Portal action."""
 
     def __init__(self, arms: dict[str, Arm]) -> None:
         self.arms = arms
@@ -191,7 +216,8 @@ class Leaders:
         return _read_pair(self.arms)
 
     def disconnect(self) -> None:
-        pass  # leave the SDK to stop with the process; never disable the motors
+        for arm in self.arms.values():
+            arm.close()
 
 
 def _arms(role: str, default_can: dict[str, str]) -> dict[str, Arm]:

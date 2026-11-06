@@ -5,7 +5,7 @@ answers 48 rows of hand poses per arm. The `dream` client turns our joints into
 hand poses and its answer back into joints, with Dream's own model of the Metal
 arm (`"ik": {"arm": "metal"}`). See tutorial/02-dream-1.md.
 
-    uv run --group dream python src/policies/dream-1/inference.py --task "fold the towel" --dry-run
+    uv run dream-1 --task "fold the towel" --dry-run
 """
 from __future__ import annotations
 
@@ -101,7 +101,7 @@ async def main() -> None:
     # Per-tick cap on the commanded target: joints in rad, grips 5% of their range per row.
     max_step = np.tile([env_float("DREAM_MAX_JOINT_RAD_S", 0.5) / fps] * 6 + [0.05 * ROW_HZ / fps], 2)
 
-    client = dream.DreamClient()  # the API key comes from ~/.dreamlabs/credentials
+    client = dream.DreamClient()  # reads DREAM_API_KEY from .env (or ~/.dreamlabs/credentials)
     worker = HardwareThread("dream-1")  # one request at a time, off the event loop
     await worker.run(client.policy, {
         "checkpoint": env_str("DREAM_CHECKPOINT", "dreamlabs/dream-1-beta"),
@@ -209,5 +209,9 @@ async def main() -> None:
             op.close()
 
 
-if __name__ == "__main__":
+def run() -> None:
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run()

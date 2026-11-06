@@ -134,6 +134,7 @@ limits, and the gripper commands to the driver's normalized opening range.
 
 | Variable | Default | Notes |
 |---|---|---|
+| `DREAM_API_KEY` | none | your Dream Labs API key; `~/.dreamlabs/credentials` also works |
 | `DREAM_CHECKPOINT` | `dreamlabs/dream-1-beta` | a base model or your fine-tune |
 | `DREAM_MAX_JOINT_RAD_S` | `0.5` | cap on commanded joint speed; also the ramp in after a handoff |
 
@@ -172,8 +173,8 @@ CUDA/MPS/CPU automatically, and waits for the `c` handoff before producing actio
   installed`: run `uv sync`. An arm that refuses to open for its gripper needs
   `METAL_GRIPPER_{CLOSED,OPEN}_DEG` set; see
   [hardware setup](01-first-recording.md#1-prepare-the-hardware).
-- **Dream-1 refuses or stalls:** for `DreamAuthError`, check the key in
-  `~/.dreamlabs/credentials`; `pool_warming` means the model is starting. It
+- **Dream-1 refuses or stalls:** for `DreamAuthError`, check `DREAM_API_KEY` in
+  `.env`; `pool_warming` means the model is starting. It
   sends nothing until all three cameras publish.
 - **Low frame rate:** compare device and tick times in robot diagnostics. Lower
   the requested rate or camera resolution if the hardware cannot keep up.

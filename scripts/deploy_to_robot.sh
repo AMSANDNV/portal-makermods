@@ -35,9 +35,7 @@ cat <<EOF
 [deploy] done. On the robot:
 
   cd $DEST
-  uv sync
-  # uv sync drops metal_sdk; reinstall it (tutorial/08-running-the-rig.md).
-  uv pip install ~/metal-python-ros/metal_sdk/binding
+  uv sync   # installs the arm driver; nothing to build
 
   uv run robot
 

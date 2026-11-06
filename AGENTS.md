@@ -8,10 +8,10 @@ Keep it small and readable. The README leads with the numbered `tutorial/`.
 
 - `src/robot.py`, `src/teleoperator.py`, and `src/recorder.py` show the Portal flows.
 - `src/utils/common.py` holds shared environment, token, and scheduling helpers.
-- `src/utils/metal.py` drives the Metal pair through MakerMods' `metal_sdk` (imported lazily);
-  `src/utils/` also holds preview, hotkey, and task-prompt details.
-- `src/policies/act/` contains training, inference, and a SkyPilot example.
-- `src/policies/dream-1/` runs Dream Labs' Dream-1 with the dream client's `metal` IK.
+- `src/utils/metal.py` drives the Metal pair through Dream Labs' `robots` package (imported lazily):
+  followers energized, leaders read-only; `src/utils/` also holds preview, hotkey, and task-prompt details.
+- `src/policies/act/` contains training (`train.py`), the operator (`run.py`, `uv run act`), and a SkyPilot example.
+- `src/policies/dream_1/` runs Dream Labs' Dream-1 (`run.py`, `uv run dream-1`) with the dream client's `metal` IK.
 - `test/` checks behavior without hardware.
 
 Run the three peers as `uv run robot`, `uv run teleoperator`, and `uv run recorder`
@@ -39,7 +39,7 @@ Update affected chapters with behavior changes.
 uv run --group train python -m unittest test.test_act
 uv run python -m test.test_teleop
 uv run python -m test.test_resilience
-uv run --group dream python -m unittest test.test_dream1
+uv run python -m unittest test.test_dream1
 # With livekit-server --dev:
 uv run python -m test.test_pubsub
 uv run python -m test.test_recorder
