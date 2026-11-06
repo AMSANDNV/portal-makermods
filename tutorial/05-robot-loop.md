@@ -55,9 +55,14 @@ A failed arm read, or a motor fault the SDK reports, is logged and counted
 instead of ending the loop; that tick publishes no state. A camera hiccup
 serves the last good frame.
 
-Nothing in this project disables the motors, on stop or on fault: a Metal arm
-has no brakes and drops when disabled. Rest or support the arms before you stop
-the robot.
+A Metal arm has no brakes and drops when disabled, so Ctrl-C and faults never
+disable the motors: the arms keep holding under power. The one switch-off is a
+park, asked for with `p` in the robot's terminal, teleop, or a policy (a Portal
+RPC to the robot). The robot releases control, walks each follower back to the
+pose it read at startup at `METAL_PARK_DEG_S` (10°/s), checks it arrived, then
+uses the driver's torque off and exits. A joint more than 10° behind its target
+stops the park and the arm holds where it is. Start the robot with the
+followers resting, since that pose is where they park.
 
 ---
 

@@ -6,6 +6,9 @@ hand poses and its answer back into joints, with Dream's own model of the Metal
 arm (`"ik": {"arm": "metal"}`). See tutorial/02-dream-1.md.
 
     uv run dream-1 --task "fold the towel" --dry-run
+
+Press c in this terminal (or in teleop) to give Dream-1 control; c here again releases it.
+Press p to park the arms: the robot walks them to rest, switches them off, and exits.
 """
 from __future__ import annotations
 
@@ -21,8 +24,9 @@ import dream
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from utils.common import CONFIG_PATH, HardwareThread, env_float, env_int, env_str, load_env, mint_token, pace, required_env
+from utils.common import CONFIG_PATH, HardwareThread, env_float, env_int, env_str, load_env, mint_token, pace, request_park, required_env
 from livekit.portal import Operator, OperatorConfig, frame_bytes_to_numpy_rgb
+from utils.hotkeys import Hotkeys
 from utils.metal import GRIPPER_MAX_MM, SIDES, arm_fields, clamp_to_limits
 
 IDENTITY = "policy-dream-1"
@@ -147,10 +151,22 @@ async def main() -> None:
     target = None  # the last commanded row
     sent_ts = None  # the observation the client has
     retry_at = 0.0
+    hotkeys = Hotkeys(global_tap=False)  # this terminal only; works over SSH
     try:
         await op.connect(url, mint_token(IDENTITY, room))
-        print(f"[dream-1] ready{' (dry run)' if args.dry_run else ''}; press c in teleop to select {IDENTITY}")
+        hotkeys.start()
+        print(f"[dream-1] ready{' (dry run)' if args.dry_run else ''}; press c here or in teleop to select {IDENTITY}, p to park")
         async for tick in pace(fps):
+            keys = hotkeys.drain()
+            if "p" in keys:
+                await request_park(op, "dream-1")
+            if "c" in keys:
+                # Explicit, like teleop's c: claim control, or release it (the robot then holds).
+                target_op = None if op.active_operator() == op.local_identity() else op.local_identity()
+                try:
+                    await op.set_active_operator(target_op)
+                except Exception as exc:
+                    print(f"[dream-1] could not change control: {exc}; press c to retry")
             obs = latest_obs
             if op.active_operator() != op.local_identity():
                 continue
@@ -201,6 +217,7 @@ async def main() -> None:
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("\n[dream-1] stopping")
     finally:
+        hotkeys.stop()
         worker.close()  # waits for a request in flight
         client.close()
         try:

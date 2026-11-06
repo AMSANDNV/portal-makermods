@@ -23,7 +23,7 @@ import rerun.blueprint as rrb
 
 
 def layout(session) -> rrb.Blueprint:
-    """Cameras across the top; under them each arm's joints and gripper, then the actions."""
+    """Cameras across the top; under them each arm's joints and gripper, then the actions; Portal's metrics last."""
     def path(name: str) -> str:
         return f"/observation/{rr.escape_entity_path_part(name)}"
 
@@ -44,7 +44,12 @@ def layout(session) -> rrb.Blueprint:
         rrb.Vertical(
             rrb.Horizontal(*cameras),
             rrb.Horizontal(*arms, rrb.TimeSeriesView(name="actions", origin="/action")),
-            row_shares=[3, 2],
+            rrb.Horizontal(  # RrdSink logs these once a second
+                rrb.TimeSeriesView(name="round trip (us)", origin="/metrics/rtt_us"),
+                rrb.TimeSeriesView(name="clock sync (us)", origin="/metrics/time_sync"),
+                rrb.TimeSeriesView(name="received (total)", origin="/metrics/transport"),
+            ),
+            row_shares=[3, 2, 1],
         ),
         collapse_panels=True,
     )

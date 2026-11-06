@@ -8,7 +8,7 @@ Every action names the frame it answers in `in_reply_to_ts_us`: the operator
 flies on video, which is usually a tick or two behind the state.
 See tutorial/06-operator-loop.md.
 
-Hotkeys: `c` cycle control, `r` toggle recording, `[` discard the take, `x` quit,
+Hotkeys: `c` cycle control, `p` park the arms (the robot exits), `r` toggle recording, `[` discard the take, `x` quit,
 `1`-`9` switch task.
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ import time
 from collections import deque
 from typing import Optional
 
-from utils.common import CONFIG_PATH, TELEOPERATOR_IDENTITY, HardwareThread, env_int, load_env, mint_token, pace, required_env
+from utils.common import request_park, CONFIG_PATH, TELEOPERATOR_IDENTITY, HardwareThread, env_int, load_env, mint_token, pace, required_env
 from livekit.portal import Operator, OperatorConfig, VideoFrameData, frame_bytes_to_numpy_rgb
 from utils.hotkeys import Hotkeys, input_backend_warning
 from utils.metal import build_leaders
@@ -170,7 +170,7 @@ async def main() -> None:
     for number, name in enumerate(tasks, start=1):
         print(f"[teleop]   {'>' if number == active + 1 else ' '} {number}  {name}")
     switch = f"  1-{len(tasks)}=switch task" if len(tasks) > 1 else ""
-    print(f"[teleop] hotkeys: c=cycle operator  r=record  [=discard the take  x=quit{switch}")
+    print(f"[teleop] hotkeys: c=cycle operator  p=park  r=record  [=discard the take  x=quit{switch}")
     preview.show_task(tasks, active)
 
     hotkeys = Hotkeys(global_tap=env_int("PORTAL_HOTKEYS_GLOBAL", 1) != 0)
@@ -190,6 +190,8 @@ async def main() -> None:
             for key in keys:
                 if key == "c":
                     await cycle_active_operator(op, me)
+                elif key == "p":
+                    await request_park(op, "teleop")
                 elif key == "r" and not recording:
                     recording = True
                     print(f"[teleop] recording {tasks[active]!r}")

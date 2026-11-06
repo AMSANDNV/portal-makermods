@@ -13,8 +13,8 @@ then use the running teleoperator and recorder:
 3. Demonstrate the task with the leaders.
 4. Press `r` to finish. For a failed attempt, press `[` while the take is open instead.
 5. Repeat steps 2–4 to collect varied successful demonstrations.
-6. Rest or support all arms, press `x` in teleop, and stop the recorder and robot
-   with Ctrl-C. Wait for the recorder to exit.
+6. Press `p` in teleop to park the followers (the robot exits), press `x`, and
+   stop the recorder with Ctrl-C. Wait for the recorder to exit.
 7. Follow [chapter 2's conversion steps](02-dream-1.md#4-convert-and-inspect),
    then continue to [ACT training](03-train-act.md).
 
@@ -72,21 +72,36 @@ ip -br link show type can
 sudo ip link set can0 up type can bitrate 1000000
 ```
 
-- **The adapter is in `lsusb` but no `canN` appears:** a program that opened it
-  over USB directly can leave it detached from the kernel driver. Reload the
+- **The adapter is in `lsusb` but no `canN` appears:** MakerMods Lab opens
+  candleLight adapters over USB directly and leaves them detached from the
+  kernel driver when it exits. Reload the
   driver with `sudo modprobe -r gs_usb && sudo modprobe gs_usb`, then bring the
   links up again.
 - **Which link is which arm:** `canN` names follow USB enumeration and can swap
-  after a reboot or replug. Identify each arm as in chapter 1, connecting one
-  adapter at a time, and check again after replugging.
-- **After a reboot:** the links come back down; run the `ip link` command again.
+  after a reboot or replug. Name each link by its adapter's USB serial instead
+  (below), then confirm with `uv run robot --check-arms`.
+- **After a reboot:** the links come back down; the rules below bring them up.
 
-For **serial adapters managed by MakerMods' SDK**, use its adapter setup and
-startup scripts instead. Its `start_can0.sh` creates a CAN link with `slcand`,
-then brings it up; the command above does not replace that process. Follow
-[MakerMods' CAN setup](https://github.com/makermods-robotics/metal-python-ros#can-setup)
-after rebooting or reconnecting the adapter. Skip startup if your service
-already brings the link up.
+To give each adapter a fixed name, list the serials behind the current links:
+
+```bash
+for link in /sys/class/net/can*; do echo "$(basename "$link") $(cat "$link"/device/../serial)"; done
+```
+
+Write one rule per adapter in `/etc/udev/rules.d/80-metal-can.rules`, with
+your serials and names, then replug the adapters (or reboot):
+
+```text
+SUBSYSTEM=="net", ACTION=="add", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="606f", ATTRS{serial}=="SERIAL_OF_LEFT", NAME="can_left", RUN+="/usr/sbin/ip link set can_left up type can bitrate 1000000"
+SUBSYSTEM=="net", ACTION=="add", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="606f", ATTRS{serial}=="SERIAL_OF_RIGHT", NAME="can_right", RUN+="/usr/sbin/ip link set can_right up type can bitrate 1000000"
+```
+
+Then set `METAL_FOLLOWER_LEFT_CAN=can_left` and `METAL_FOLLOWER_RIGHT_CAN=can_right`.
+
+For **serial adapters set up with MakerMods' tools**, see [MakerMods Lab](https://github.com/makermods-robotics/makermodslab) for
+their adapter detection, CAN setup, and controls. If an `slcand` service
+already brings the link up, use that link's name; the `ip link` command above
+does not replace that process.
 
 [Dream's quickstart](https://github.com/dreamlabs-co/dreamlabs#quick-guide)
 also offers `dreamcli setup` and `dreamcli robot up` for its complete control
@@ -177,6 +192,9 @@ CUDA/MPS/CPU automatically, and waits for the `c` handoff before producing actio
   Accessibility permission for the terminal on macOS. Relaunch after granting it.
 - **No observations in ACT:** every declared camera must publish; the checkpoint
   must use cameras available in `portal.yaml`.
+- **`still powered from an earlier session`:** the robot was stopped with
+  Ctrl-C or crashed, so the joints still hold. Support the arms and cycle their
+  power, then start the robot. End sessions with `p` to avoid this.
 - **Arm errors:** the robot's 5 s line names the arm. Check its configured adapter
   path, serial permissions, and power, then restart the robot. For SocketCAN,
   also check the link with `ip link`. `dreamlabs is not

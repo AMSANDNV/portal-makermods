@@ -1,4 +1,4 @@
-"""Run an ACT checkpoint as a Portal operator; press c in teleop to hand it control."""
+"""Run an ACT checkpoint as a Portal operator; press c here or in teleop to hand it control, p to park the arms."""
 from __future__ import annotations
 
 import argparse
@@ -16,7 +16,8 @@ from lerobot.processor.converters import policy_action_to_transition, transition
 from lerobot.processor.pipeline import DataProcessorPipeline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from utils.common import CONFIG_PATH, HardwareThread, env_int, load_env, mint_token, pace, required_env
+from utils.common import CONFIG_PATH, HardwareThread, env_int, load_env, mint_token, pace, request_park, required_env
+from utils.hotkeys import Hotkeys
 from livekit.portal import Operator, OperatorConfig, frame_bytes_to_numpy_rgb
 
 IDENTITY = "policy-act"
@@ -108,11 +109,21 @@ async def main() -> None:
 
     op.on_observation(on_observation)
     op.on_active_operator_changed(on_active_operator_changed)
+    hotkeys = Hotkeys(global_tap=False)  # this terminal only; works over SSH
     try:
         await op.connect(url, mint_token(IDENTITY, room))
         me = op.local_identity()
-        print(f"[policy-act] ready on {device}; press c in teleop to select {me}")
+        hotkeys.start()
+        print(f"[policy-act] ready on {device}; press c here or in teleop to select {me}, p to park")
         async for _ in pace(fps):
+            keys = hotkeys.drain()
+            if "p" in keys:
+                await request_park(op, "policy-act")
+            if "c" in keys:  # explicit, like teleop's c: claim control, or release it (the robot then holds)
+                try:
+                    await op.set_active_operator(None if op.active_operator() == me else me)
+                except Exception as exc:
+                    print(f"[policy-act] could not change control: {exc}; press c to retry")
             obs = latest_obs
             if op.active_operator() != me or obs is None or any(c not in obs.frames for c in cameras):
                 continue
@@ -131,6 +142,7 @@ async def main() -> None:
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("\n[policy-act] stopping")
     finally:
+        hotkeys.stop()
         worker.close()
         try:
             await op.disconnect()

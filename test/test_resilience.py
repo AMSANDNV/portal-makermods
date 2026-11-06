@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import math
+import os
 import sys
 from types import SimpleNamespace
 
@@ -35,6 +36,36 @@ class FakeArm:
 
     def close(self):
         pass
+
+
+class TrackingArm(FakeArm):
+    """Follows each command exactly, or not at all when `blocked`; records a switch-off."""
+
+    def __init__(self, start, blocked=False):
+        super().__init__()
+        self.pose, self.blocked, self.off = list(start), blocked, False
+
+    def read(self):
+        if self.raises:
+            raise OSError("CAN read failed")
+        return SimpleNamespace(positions_rad=np.array(self.pose[:6]), gripper=self.pose[6] / GRIPPER_MAX_MM)
+
+    def write(self, command):
+        super().write(command)
+        if not self.blocked:
+            self.pose = self.commands[-1]
+
+    def torque_off(self):
+        self.off = True
+
+
+def parking(blocked=False):
+    arms = {}
+    for side in ("left", "right"):
+        arms[side] = Arm(side, "can0", leader=False)
+        arms[side]._arm = TrackingArm([0.5, -1.0, 1.0, 0.2, 0.0, 0.0, 30.0], blocked and side == "left")
+        arms[side].rest = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    return Followers(arms, {}, StepLimiter(0.1))
 
 
 class FakeCamera:
@@ -105,6 +136,34 @@ def main() -> int:
     c.check(len(leaders.get_action()) == 14, "both leaders read: one fourteen-value action")
     leaders.arms["left"]._arm.raises = True
     c.check(leaders.get_action() == {}, "one leader unreadable: no action, never half of one")
+
+    os.environ["METAL_PARK_DEG_S"] = "3000"  # fast, so the test takes a second
+    p = parking()
+    p.park(fps=100)
+    poses = [a._arm.pose[:6] for a in p.arms.values()]
+    c.check(all(max(map(abs, pose)) < 1e-6 for pose in poses), "park walks both arms to their rest pose")
+    c.check(all(a._arm.off for a in p.arms.values()), "park switches the arms off once they are at rest")
+    steps = [abs(b[1] - a[1]) for a, b in zip(p.arms["right"]._arm.commands, p.arms["right"]._arm.commands[1:])]
+    c.check(max(steps) <= math.radians(30) + 1e-9, "park never jumps more than one step per tick", f"{max(steps):.3f}")
+
+    p = parking(blocked=True)
+    try:
+        p.park(fps=100)
+        raised = False
+    except RuntimeError:
+        raised = True
+    c.check(raised and not any(a._arm.off for a in p.arms.values()),
+            "a blocked arm stops the park: nothing is switched off")
+
+    p = parking()
+    p.arms["right"]._arm.raises = True
+    try:
+        p.park(fps=100)
+        raised = False
+    except RuntimeError:
+        raised = True
+    c.check(raised and not p.arms["left"]._arm.commands and not p.arms["left"]._arm.off,
+            "an unreadable arm: no park, nothing moves, nothing switched off")
     return c.exit_code
 
 

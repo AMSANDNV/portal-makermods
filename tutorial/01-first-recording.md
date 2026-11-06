@@ -19,7 +19,10 @@ repository version and `portal.yaml` on both. Other layouts are covered in the
    [SocketCAN alternative](09-reference.md#socketcan-alternative).
 3. Support the arms before powering them. Leaders are read-only and must be
    supported by hand; followers hold their pose under power. The arms have no brakes.
-4. Use the vendor setup tools to check joint zeros and measure each gripper's
+   Rest the followers where they can go limp, such as folded on their stops: the robot
+   records that pose at startup and parks there when you press `p`.
+4. Use [MakerMods Lab](https://github.com/makermods-robotics/makermodslab), MakerMods' setup and control app, to check joint zeros, find
+   which adapter drives which arm, and measure each gripper's
    motor angle with its jaws fully closed and fully open. Keep these four
    measurements for each host. Do not substitute example angles.
 
@@ -101,7 +104,9 @@ METAL_LEADER_LEFT_CAN=/dev/serial/by-id/LEFT_ADAPTER_ID
 ```
 
 Use the stable paths rather than `/dev/ttyACM0`, whose number can change after
-reconnecting. If no unique paths appear, see [serial adapter setup](09-reference.md#serial-adapter-setup).
+reconnecting. To confirm which arm is which, run `uv run robot --check-arms`
+with the arms powered: it reads the followers with their motors off and prints
+each one's joints. Move one arm by hand and watch which line changes. If no unique paths appear, see [serial adapter setup](09-reference.md#serial-adapter-setup).
 If `/dev/serial/by-id/` is empty and `lsusb` lists a `candleLight USB to CAN
 adapter`, use the [SocketCAN alternative](09-reference.md#socketcan-alternative)
 and set the two variables to the `canN` names instead.
@@ -113,8 +118,8 @@ sudo usermod -aG dialout "$USER"
 ```
 
 Log out and back in for the group change to apply. Dream's driver handles the
-serial connection and bitrate when the Portal peers start. Leave vendor control
-programs and `dreamcli robot up` stopped; Portal runs the control loop here.
+serial connection and bitrate when the Portal peers start. Close MakerMods Lab
+and leave `dreamcli robot up` stopped; Portal runs the control loop here.
 If a vendor `slcand` service already owns the adapter, follow the
 [existing-adapter instructions](09-reference.md#serial-adapter-setup).
 
@@ -177,8 +182,11 @@ In the teleop terminal:
 Leave all three processes running and continue to
 **[2. Run Dream-1 and record corrections](02-dream-1.md)**.
 
-If you need to stop here, rest or support all arms, press `x` in teleop,
-then stop the recorder and robot with Ctrl-C. Wait for the recorder to exit.
+If you need to stop here, press `p` in teleop to park: the followers walk back to the pose they
+started in, switch off, and the robot exits. Then press `x` in teleop and stop the
+recorder with Ctrl-C. Wait for the recorder to exit. Ctrl-C on the robot instead
+leaves the arms holding under power, and the next start then refuses until you
+support them and cycle their power.
 
 To record without a policy, follow the
 [human-only alternative](09-reference.md#human-only-demonstrations).

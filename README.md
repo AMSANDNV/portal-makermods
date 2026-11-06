@@ -41,8 +41,9 @@ Read these after completing the walkthrough, or when you need to change the code
 | [08. Handoff](tutorial/08-handoff.md) | Switch between human and policy |
 | [09. Reference](tutorial/09-reference.md) | Settings, alternatives, and troubleshooting |
 
-**Metal arms have no brakes.** Rest or support them before stopping the robot
-or teleoperator. This project never disables the motors on stop or fault.
+**Metal arms have no brakes.** Start the robot with the followers resting, and end
+with `p` (park): they walk back to that pose, switch off, and the robot exits.
+Ctrl-C and faults never disable the motors; the arms keep holding under power.
 
 The runnable peers are in `src/`; policies are in `src/policies/`.
 All peers share [`portal.yaml`](portal.yaml).

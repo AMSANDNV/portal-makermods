@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from livekit.portal import OperatorConfig
 
-from policies.act.inference import action_dict, build_batch, dataset_fields
+from policies.act.run import action_dict, build_batch, dataset_fields
 from policies.act.train import find_resume_config, training_args
 from utils.common import CONFIG_PATH
 

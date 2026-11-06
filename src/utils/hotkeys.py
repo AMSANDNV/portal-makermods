@@ -15,10 +15,8 @@ import time
 import tty
 from typing import Optional
 
-from pynput import keyboard
-
 # `1`-`9` select the session's task; see src/utils/session.py for why nine.
-KEYS = {"c", "r", "[", "x"} | {str(digit) for digit in range(1, 10)}
+KEYS = {"c", "p", "r", "[", "x"} | {str(digit) for digit in range(1, 10)}
 
 # One keystroke can reach both sources. The same key from the OTHER source
 # within this window is that echo, not a second press.
@@ -117,7 +115,11 @@ class Hotkeys:
         self._lock = threading.Lock()
         self._pending: list[str] = []
         self._last: tuple[str, str, float] = ("", "", 0.0)
-        self._listener = keyboard.Listener(on_press=self._on_press) if global_tap else None
+        self._listener = None
+        if global_tap:
+            from pynput import keyboard  # lazy: it fails to import without a display, e.g. over SSH
+
+            self._listener = keyboard.Listener(on_press=self._on_press)
         self._terminal = _TerminalTap(self._deliver)
         self.terminal_active = False
 

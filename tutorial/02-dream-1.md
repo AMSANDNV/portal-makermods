@@ -27,7 +27,8 @@ In a fourth terminal on the robot host:
 uv run dream-1 --task "fold the towel" --dry-run
 ```
 
-1. In teleop, press `c` until `policy-dream-1` is selected.
+1. In teleop, press `c` until `policy-dream-1` is selected. Without a teleop
+   host, press `c` in the Dream-1 terminal instead; `c` there again releases control.
 2. Check the targets printed by Dream-1. They should be near the current arm poses.
    Dry-run prints targets but sends no motion commands.
 3. Press `c` to select the human again.
@@ -64,8 +65,10 @@ before taking over.
 
 ## 4. Convert and inspect
 
-Finish the take, select the human, and support the arms. Stop Dream-1 with Ctrl-C,
-quit teleop with `x`, then stop the recorder and robot with Ctrl-C.
+Finish the take and select the human. Press `p` in teleop or the Dream-1 terminal
+to park: the followers walk back to the pose they started in, switch off, and the
+robot exits. Stop Dream-1 with Ctrl-C, quit teleop with `x`, then stop the
+recorder with Ctrl-C.
 
 The recorder saves `.rrd` archives under `data/sessions`. Keep them so you can
 rebuild the dataset later. On the robot host, check the conversion report:
