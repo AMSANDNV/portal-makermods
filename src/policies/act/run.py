@@ -1,4 +1,4 @@
-"""Run an ACT checkpoint as a Portal operator; press c here or in teleop to hand it control, p to park the arms."""
+"""An ACT checkpoint as a Portal operator. Keys here: `c` takes or releases control, `p` parks or powers up."""
 from __future__ import annotations
 
 import argparse
@@ -16,7 +16,8 @@ from lerobot.processor.converters import policy_action_to_transition, transition
 from lerobot.processor.pipeline import DataProcessorPipeline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from utils.common import CONFIG_PATH, HardwareThread, env_int, load_env, mint_token, pace, request_park, required_env
+from utils.common import (CONFIG_PATH, HardwareThread, claim_or_release, env_int, load_env, mint_token, pace,
+                          request_park, required_env)
 from utils.hotkeys import Hotkeys
 from livekit.portal import Operator, OperatorConfig, frame_bytes_to_numpy_rgb
 
@@ -114,16 +115,13 @@ async def main() -> None:
         await op.connect(url, mint_token(IDENTITY, room))
         me = op.local_identity()
         hotkeys.start()
-        print(f"[policy-act] ready on {device}; press c here or in teleop to select {me}, p to park")
+        print(f"[policy-act] ready on {device}; c takes control, p parks")
         async for _ in pace(fps):
             keys = hotkeys.drain()
             if "p" in keys:
                 await request_park(op, "policy-act")
-            if "c" in keys:  # explicit, like teleop's c: claim control, or release it (the robot then holds)
-                try:
-                    await op.set_active_operator(None if op.active_operator() == me else me)
-                except Exception as exc:
-                    print(f"[policy-act] could not change control: {exc}; press c to retry")
+            if "c" in keys:
+                await claim_or_release(op, "policy-act")
             obs = latest_obs
             if op.active_operator() != me or obs is None or any(c not in obs.frames for c in cameras):
                 continue

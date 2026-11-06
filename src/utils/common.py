@@ -25,15 +25,24 @@ CONFIG_PATH = ROOT / "portal.yaml"
 ROBOT_IDENTITY = "robot"
 TELEOPERATOR_IDENTITY = "teleoperator"
 RECORDER_IDENTITY = "recorder"
-PARK_RPC = "park"  # any operator's `p`: the robot parks the arms (switched off at rest), or powers them up
+PARK_RPC = "park"  # `p` in any operator: the robot parks the arms, or powers parked arms up
 
 
 async def request_park(op, who: str) -> None:
-    """Ask the robot to park, or to power up a parked robot; it answers at once and acts on its own loop."""
+    """Ask the robot to park or power up; it answers at once and acts on its own loop."""
     try:
         print(f"[{who}] robot: {await op.perform_rpc(PARK_RPC, destination=ROBOT_IDENTITY)}")
     except Exception as exc:
         print(f"[{who}] park request failed: {exc}; press p to retry")
+
+
+async def claim_or_release(op, who: str) -> None:
+    """A policy's own `c`: take control, or give it up (the robot then holds)."""
+    me = op.local_identity()
+    try:
+        await op.set_active_operator(None if op.active_operator() == me else me)
+    except Exception as exc:
+        print(f"[{who}] could not change control: {exc}; press c to retry")
 
 
 def load_env() -> None:

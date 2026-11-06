@@ -47,24 +47,20 @@ new operator. If the active operator disconnects, it also releases the gate.
 
 The followers ramp each joint target at most `METAL_MAX_STEP_RAD` per command,
 starting from the measured pose and again after any pause in commands, and clamp
-every joint to MakerMods' soft limits. An arm is never commanded before it has
+every joint to the soft limits. An arm is never commanded before it has
 been read. This limits command changes during takeover; it is not a guarantee of
 physical motor speed.
 
-A failed arm read, or a motor fault the SDK reports, is logged and counted
-instead of ending the loop; that tick publishes no state. A camera hiccup
-serves the last good frame.
+A failed arm read is logged and counted instead of ending the loop; that tick
+publishes no state. A camera hiccup serves the last good frame.
 
 A Metal arm has no brakes and drops when disabled, so a fault never disables
-the motors. The one switch-off is a park: `p` in the robot's terminal, teleop,
-or a policy (a Portal RPC to the robot), and Ctrl-C on the robot before it
-exits. The robot releases control, walks each follower back to the pose it read
-at startup at `METAL_PARK_DEG_S` (10°/s), checks it arrived, then uses the
-driver's torque off and reopens the arms read-only: state and video keep
-flowing and actions are ignored. `p` again powers the arms up where they rest.
-A joint more than 10° behind its target stops the park and the arm holds where
-it is. Start the robot with the followers resting, since that pose is where
-they park.
+the motors. The one switch-off is a park, which `p` asks for over a Portal RPC
+and every robot exit runs first: walk each follower back to the pose read at
+startup, check it arrived, switch it off, and reopen it read-only so state keeps
+flowing. A park that cannot finish leaves the arms holding. Startup opens both
+arms or neither: if one fails, the other is switched off where it opened. See
+[parking and power](09-reference.md#parking-and-power).
 
 ---
 

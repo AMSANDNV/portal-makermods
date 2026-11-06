@@ -1,14 +1,10 @@
-"""Run Dream Labs' Dream-1 as a Portal operator; press c in teleop to hand it control.
-
-Dream-1 runs on Dream Labs' servers. It reads three views and both arms, and
-answers 48 rows of hand poses per arm. The `dream` client turns our joints into
-hand poses and its answer back into joints, with Dream's own model of the Metal
-arm (`"ik": {"arm": "metal"}`). See tutorial/02-dream-1.md.
+"""Dream Labs' Dream-1 as a Portal operator. See tutorial/02-dream-1.md.
 
     uv run dream-1 --task "fold the towel" --dry-run
 
-Press c in this terminal (or in teleop) to give Dream-1 control; c here again releases it.
-Press p to park the arms (the robot walks them to rest and switches them off); p again powers them up.
+Dream-1 runs on Dream Labs' servers: it reads three views and both arms and answers chunks of
+joint rows, through the `dream` client's model of the Metal arm. Keys in this terminal: `c`
+takes or releases control (as `c` in teleop does), `p` parks the arms or powers them up.
 """
 from __future__ import annotations
 
@@ -24,7 +20,8 @@ import dream
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from utils.common import CONFIG_PATH, HardwareThread, env_float, env_int, env_str, load_env, mint_token, pace, request_park, required_env
+from utils.common import (CONFIG_PATH, HardwareThread, claim_or_release, env_float, env_int, env_str, load_env,
+                          mint_token, pace, request_park, required_env)
 from livekit.portal import Operator, OperatorConfig, frame_bytes_to_numpy_rgb
 from utils.hotkeys import Hotkeys
 from utils.metal import GRIPPER_MAX_MM, SIDES, arm_fields, clamp_to_limits
@@ -33,7 +30,6 @@ IDENTITY = "policy-dream-1"
 CAMERAS = {"overhead": "overhead_camera", "wrist_l": "left_wrist_camera", "wrist_r": "right_wrist_camera"}
 ROW_HZ = 20  # chunk rows played per second
 STALE_S = 0.2  # hold when the newest observation is older than this
-GRIP_MM = 100.0  # Dream's Metal grip is the stroke in mm / 100
 
 
 def embodiment() -> dict:
@@ -62,7 +58,7 @@ def to_model(state: dict) -> np.ndarray:
     row = []
     for side in SIDES:
         *joints, gripper = arm_fields(side)
-        row += [state[name] for name in joints] + [min(max(state[gripper] / GRIP_MM, 0.0), 1.0)]
+        row += [state[name] for name in joints] + [min(max(state[gripper] / GRIPPER_MAX_MM, 0.0), 1.0)]
     return np.array(row)
 
 
@@ -70,7 +66,7 @@ def to_robot(row: np.ndarray) -> dict[str, float]:
     """14 model values -> a Portal action, inside the soft limits."""
     action = dict(zip(arm_fields("left") + arm_fields("right"), map(float, row)))
     for side in SIDES:
-        action[f"{side}_gripper.pos"] = min(action[f"{side}_gripper.pos"] * GRIP_MM, GRIPPER_MAX_MM)
+        action[f"{side}_gripper.pos"] *= GRIPPER_MAX_MM
     return clamp_to_limits(action)
 
 
@@ -82,14 +78,15 @@ def chunk_rows(reply: dict) -> np.ndarray:
     return np.concatenate([left, right], axis=1)
 
 
-def retry_delay(error: dream.DreamError) -> float:
-    """Seconds to wait before asking again; raises when asking again cannot help."""
+def retry_delay(error: Exception) -> float:
+    """Seconds to wait before asking again; raises when asking again cannot help (a bad key, a bad reply)."""
     if isinstance(error, dream.DreamSessionExpired):
         return 0.0  # the client already opened a new session
-    if isinstance(error, (dream.DreamTimeout, dream.DreamProtocolError)) or getattr(error, "retryable", False):
-        print(f"[dream-1] {getattr(error, 'reason', None) or error}; asking again")
-        return getattr(error, "retry_after_s", None) or 1.0
-    raise error
+    if isinstance(error, dream.DreamError) and not (
+            isinstance(error, (dream.DreamTimeout, dream.DreamProtocolError)) or getattr(error, "retryable", False)):
+        raise error
+    print(f"[dream-1] {getattr(error, 'reason', None) or error!r}; asking again")  # incl. network errors
+    return getattr(error, "retry_after_s", None) or 1.0
 
 
 async def main() -> None:
@@ -155,18 +152,13 @@ async def main() -> None:
     try:
         await op.connect(url, mint_token(IDENTITY, room))
         hotkeys.start()
-        print(f"[dream-1] ready{' (dry run)' if args.dry_run else ''}; press c here or in teleop to select {IDENTITY}, p to park")
+        print(f"[dream-1] ready{' (dry run)' if args.dry_run else ''}; c takes control, p parks")
         async for tick in pace(fps):
             keys = hotkeys.drain()
             if "p" in keys:
                 await request_park(op, "dream-1")
             if "c" in keys:
-                # Explicit, like teleop's c: claim control, or release it (the robot then holds).
-                target_op = None if op.active_operator() == op.local_identity() else op.local_identity()
-                try:
-                    await op.set_active_operator(target_op)
-                except Exception as exc:
-                    print(f"[dream-1] could not change control: {exc}; press c to retry")
+                await claim_or_release(op, "dream-1")
             obs = latest_obs
             if op.active_operator() != op.local_identity():
                 continue
@@ -192,7 +184,7 @@ async def main() -> None:
                 try:
                     asked_at, rows = request.result()
                     chunk = (asked_at, rows, int((now - asked_at) * ROW_HZ))  # skip rows the round trip used up
-                except dream.DreamError as error:
+                except Exception as error:
                     retry_at = now + retry_delay(error)
                 request = None
 

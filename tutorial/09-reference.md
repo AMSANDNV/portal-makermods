@@ -40,73 +40,62 @@ Replace the host and destination path. This replaces source, `.env`, and
 `.env.local` on the destination; datasets and training outputs are excluded.
 Run `uv sync` there afterwards and check its hardware settings.
 
-## Serial adapter setup
+## CAN adapters
 
-The default walkthrough uses SLCAN USB adapters directly. Dream's installed
-`robots.robstride.open_can_bus()` opens `/dev/...` paths with python-can's
-SLCAN backend at 1 Mbps. It also resolves symlinks when checking whether an
-existing `slcand` process owns the device.
+Dream's driver opens `/dev/...` paths as serial (SLCAN) adapters at 1 Mbps,
+and any other name as a SocketCAN link, which must already be up at 1 Mbps.
 
-- **No unique `/dev/serial/by-id/` entries:** identify adapters one at a time
-  with `ls -l /dev/serial/by-path/` and use those paths instead. Keep each adapter
-  in the same physical USB port.
-- **Permission denied:** on Ubuntu, add your user to `dialout` as shown in
-  chapter 1, then log out and back in.
-- **An existing `slcand` owns the adapter:** Dream uses that daemon's CAN link
-  if it is already up. You can keep this working setup. To switch to direct
-  serial access, stop robot software, support the arms, and stop the specific
-  vendor service that owns the adapter before starting Portal.
-- **Only `canN` devices appear:** use the SocketCAN alternative below.
+**Serial adapters**
 
-## SocketCAN alternative
+- **No unique `/dev/serial/by-id/` entries:** use `/dev/serial/by-path/` instead
+  and keep each adapter in the same USB port.
+- **Permission denied:** add your user to `dialout` and log in again.
+- **An `slcand` service already owns the adapter:** set that service's `canN`
+  link name instead of the serial path.
 
-Existing rigs can keep their configured `canN` interfaces. Set each
-`METAL_{FOLLOWER,LEADER}_{LEFT,RIGHT}_CAN` to the interface for that arm.
-Dream expects these links to be up at 1 Mbps before Portal starts.
+**candleLight (`gs_usb`) adapters**
 
-For **native SocketCAN** adapters such as candleLight (`gs_usb`), bring up
-each interface that is down (replace `can0` with its actual name):
+- **In `lsusb` but no `canN`:** MakerMods Lab drives these adapters directly
+  over USB and leaves them detached from the kernel driver when it exits.
+  Reattach them, then bring the links up:
 
-```bash
-ip -br link show type can
-sudo ip link set can0 up type can bitrate 1000000
-```
+  ```bash
+  sudo modprobe -r gs_usb && sudo modprobe gs_usb
+  ```
 
-- **The adapter is in `lsusb` but no `canN` appears:** MakerMods Lab opens
-  candleLight adapters over USB directly and leaves them detached from the
-  kernel driver when it exits. Reload the
-  driver with `sudo modprobe -r gs_usb && sudo modprobe gs_usb`, then bring the
-  links up again.
-- **Which link is which arm:** `canN` names follow USB enumeration and can swap
-  after a reboot or replug. Name each link by its adapter's USB serial instead
-  (below), then confirm with `uv run robot --check-arms`.
-- **After a reboot:** the links come back down; the rules below bring them up.
+- **`canN` names can swap** after a reboot or replug, since they follow USB
+  enumeration. Pin each adapter to a name by its USB serial. List the serials:
 
-To give each adapter a fixed name, list the serials behind the current links:
+  ```bash
+  for link in /sys/class/net/can*; do echo "$(basename "$link") $(cat "$link"/device/../serial)"; done
+  ```
 
-```bash
-for link in /sys/class/net/can*; do echo "$(basename "$link") $(cat "$link"/device/../serial)"; done
-```
+  Then write one line per adapter to `/etc/udev/rules.d/80-metal-can.rules`
+  with your serials, and replug the adapters. Each link is named and brought up
+  at 1 Mbps, also after a reboot:
 
-Write one rule per adapter in `/etc/udev/rules.d/80-metal-can.rules`, with
-your serials and names, then replug the adapters (or reboot):
+  ```text
+  SUBSYSTEM=="net", ACTION=="add", ATTRS{serial}=="SERIAL_OF_LEFT", NAME="can_left", RUN+="/usr/sbin/ip link set can_left up type can bitrate 1000000"
+  SUBSYSTEM=="net", ACTION=="add", ATTRS{serial}=="SERIAL_OF_RIGHT", NAME="can_right", RUN+="/usr/sbin/ip link set can_right up type can bitrate 1000000"
+  ```
 
-```text
-SUBSYSTEM=="net", ACTION=="add", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="606f", ATTRS{serial}=="SERIAL_OF_LEFT", NAME="can_left", RUN+="/usr/sbin/ip link set can_left up type can bitrate 1000000"
-SUBSYSTEM=="net", ACTION=="add", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="606f", ATTRS{serial}=="SERIAL_OF_RIGHT", NAME="can_right", RUN+="/usr/sbin/ip link set can_right up type can bitrate 1000000"
-```
+  Set `METAL_FOLLOWER_LEFT_CAN=can_left` and `METAL_FOLLOWER_RIGHT_CAN=can_right`,
+  and confirm with `uv run robot --check-arms`.
 
-Then set `METAL_FOLLOWER_LEFT_CAN=can_left` and `METAL_FOLLOWER_RIGHT_CAN=can_right`.
+Run one controller at a time: close MakerMods Lab, and leave Dream's
+`dreamcli robot up` stopped while the Portal peers run.
 
-For **serial adapters set up with MakerMods' tools**, see [MakerMods Lab](https://github.com/makermods-robotics/makermodslab) for
-their adapter detection, CAN setup, and controls. If an `slcand` service
-already brings the link up, use that link's name; the `ip link` command above
-does not replace that process.
+## Parking and power
 
-[Dream's quickstart](https://github.com/dreamlabs-co/dreamlabs#quick-guide)
-also offers `dreamcli setup` and `dreamcli robot up` for its complete control
-loop. This tutorial uses Dream's driver and model client inside Portal's loop,
-so do not run that robot process alongside the Portal peers.
+The robot records each follower's pose when it starts. A park walks both arms
+back to that pose at `METAL_PARK_DEG_S`, checks they arrived, switches them off,
+and reopens them read-only so state keeps flowing. `p` in the robot terminal,
+teleop, Dream-1, or ACT parks, or powers parked arms up. Ctrl-C, or any other
+exit, parks before the robot stops.
+
+A park stops, and the arms keep holding under power, if an arm is unreadable,
+falls more than 10° behind its target (blocked), or ends more than 3° from its
+rest pose. A fault never switches the motors off.
 
 ## Training alternatives
 
@@ -141,19 +130,20 @@ shell values. Relative output paths use the working directory.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `METAL_GRIPPER_CLOSED_DEG`, `METAL_GRIPPER_OPEN_DEG` | — (required) | gripper motor angle, jaws closed / open; measure per arm. Per-side: `METAL_{LEFT,RIGHT}_GRIPPER_*_DEG` |
+| `METAL_GRIPPER_CLOSED_DEG`, `METAL_GRIPPER_OPEN_DEG` | required | gripper motor angle with the jaws closed / open; per arm as `METAL_{LEFT,RIGHT}_GRIPPER_*_DEG` |
 | `METAL_GRIPPER_HOLD_NM` | `0.5` | the gripper's holding torque on an object, N.m |
-| `METAL_FOLLOWER_RIGHT_CAN`, `METAL_FOLLOWER_LEFT_CAN` | `can1`, `can3` (legacy fallback) | Set robot-host serial paths for the walkthrough |
-| `METAL_LEADER_RIGHT_CAN`, `METAL_LEADER_LEFT_CAN` | `can0`, `can2` (legacy fallback) | Set teleop-host serial paths for the walkthrough |
+| `METAL_FOLLOWER_LEFT_CAN`, `METAL_FOLLOWER_RIGHT_CAN` | required on the robot host | serial path or SocketCAN link per arm |
+| `METAL_LEADER_LEFT_CAN`, `METAL_LEADER_RIGHT_CAN` | required on the teleop host | serial path or SocketCAN link per arm |
+| `METAL_PARK_DEG_S` | `10` | joint speed while parking |
 | `METAL_CAM_OVERHEAD`, `METAL_CAM_LEFT_WRIST`, `METAL_CAM_RIGHT_WRIST` | `/dev/video0`, `/dev/video2`, `/dev/video4` | Linux camera device path. |
 | `METAL_CAM_WIDTH` / `_HEIGHT` | `640` / `480` | a 16:9 mode such as 1280x720 suits Dream-1 better; it center-crops otherwise |
 | `METAL_MAX_STEP_RAD` | `0.087` | maximum joint target step per command (about 5°); `0` disables the limit |
 
-`METAL_MAX_STEP_RAD` limits target movement per command (0.087 rad × 30 Hz is
-about 2.6 rad/s). Use a lower value for bring-up. Grippers are not ramped. The arm joints run impedance
-control: ramping the target preserves torque, while a small tracking-error
-clamp can prevent motion. Every command is also clamped to MakerMods' soft
-limits, and the gripper commands to the driver's normalized opening range.
+`METAL_MAX_STEP_RAD` limits how far a joint target moves per command (0.087 rad
+at 30 Hz is about 2.6 rad/s); use a lower value for bring-up. Grippers are not
+ramped. The joints run impedance control, so the target is ramped and the
+tracking error is never clamped: a clamped error caps the torque and can stall
+a joint. Every command is also clamped to the soft limits.
 
 ### Dream-1
 
@@ -186,27 +176,32 @@ CUDA/MPS/CPU automatically, and waits for the `c` handoff before producing actio
 
 ## Troubleshooting
 
-- **No motion:** press `c` and check the active identity. Confirm the server and
-  room match on all hosts. A failed claim reports its RPC error.
-- **No hotkeys:** focus the teleop terminal. Global keys require X11 on Linux or
-  Accessibility permission for the terminal on macOS. Relaunch after granting it.
-- **No observations in ACT:** every declared camera must publish; the checkpoint
-  must use cameras available in `portal.yaml`.
-- **`still powered from an earlier session`:** the last robot crashed or could
-  not finish its park, so the joints still hold. Support the arms and cycle
-  their power, then start the robot.
-- **Arm errors:** the robot's 5 s line names the arm. Check its configured adapter
-  path, serial permissions, and power, then restart the robot. For SocketCAN,
-  also check the link with `ip link`. `dreamlabs is not
-  installed`: run `uv sync`. An arm that refuses to open for its gripper needs
-  `METAL_GRIPPER_{CLOSED,OPEN}_DEG` set; see
-  [hardware setup](01-first-recording.md#1-prepare-the-hardware).
-- **Dream-1 refuses or stalls:** for `DreamAuthError`, check `DREAM_API_KEY` in
-  `.env`; `pool_warming` means the model is starting. It
-  sends nothing until all three cameras publish.
-- **Low frame rate:** compare device and tick times in robot diagnostics. Lower
-  the requested rate or camera resolution if the hardware cannot keep up.
-- **Archive writer drops:** lower JPEG quality or resolution. Check disk capacity.
+- **The robot refuses to start: `still powered from an earlier session`.** The
+  last robot crashed or its park could not finish, so the joints still hold.
+  Support the arms, switch their power off and on, then start the robot.
+- **An arm does not open.** Check its `METAL_*_CAN` value, the adapter's link or
+  serial permissions, and the arm's 24 V power; for candleLight see
+  [CAN adapters](#can-adapters). `set METAL_GRIPPER_..._DEG` means a gripper
+  angle is missing from `.env`.
+- **The wrong arm moves.** Left and right are swapped in `.env`: check with
+  `uv run robot --check-arms` and swap the two values.
+- **`the gripper stops opening at N deg`.** The open angle is past the real
+  stop; set that arm's `METAL_*_GRIPPER_OPEN_DEG` to N.
+- **A park stopped.** The robot names the arm and the reason; the arms hold.
+  Clear the obstruction and press `p` again.
+- **No motion.** Press `c` and check the active operator. All hosts must use the
+  same server and room.
+- **No hotkeys.** Focus the terminal of the process. Global keys need X11 on
+  Linux or Accessibility permission on macOS.
+- **Dream-1 refuses or stalls.** `DreamAuthError`: check `DREAM_API_KEY`.
+  `pool_warming`: the model is starting. It sends nothing until all three
+  cameras publish.
+- **ACT sees no observations.** Every camera the checkpoint uses must publish.
+- **Low frame rate.** Compare device and tick times in the robot's 5 s line, and
+  lower the rate or camera resolution if the hardware cannot keep up.
+- **The recorder drops frames.** Lower the JPEG quality or resolution; check disk space.
+- **The recorder or observer will not join.** Start the robot first: they wait
+  for its clock.
 
 ---
 

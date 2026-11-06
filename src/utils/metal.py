@@ -1,10 +1,9 @@
-"""Two Metal followers with three cameras and two Metal leaders, over Dream's `robots` driver.
+"""Two Metal followers with three cameras, and two Metal leaders, over Dream Labs' `robots` driver.
 
-Each arm is one follower on its own CAN link: seven values, joint1..joint6 in radians then the
-gripper (0 closed, GRIPPER_MAX_MM open). Followers are energized (position control with gravity
-feed-forward); leaders open read-only, moved by hand. The arms are brakeless and drop when
-unpowered: only `Followers.park()`, asked for explicitly, switches them off, and only after walking
-them back to the pose each was opened in; `unpark()` powers them up again. See tutorial/05-robot-loop.md.
+Each arm reads and takes seven values: joint1..joint6 in radians, then the gripper in mm (0 closed).
+Followers are energized; leaders open read-only and are moved by hand. The arms have no brakes, so
+the only switch-off is `Followers.park()`, which first walks them back to where they were opened.
+See tutorial/05-robot-loop.md.
 """
 from __future__ import annotations
 
@@ -15,21 +14,20 @@ import time
 
 import numpy as np
 
-from utils.common import env_camera_id, env_float, env_int, env_str
+from utils.common import env_camera_id, env_float, env_int, env_str, required_env
 
 logger = logging.getLogger(__name__)
 
 SIDES = ("left", "right")
-GRIPPER_MAX_MM = 100.0  # Dream's grip scale: the driver's gripper 0..1 maps 1.0 to this many mm
-# Soft limits for joint1..joint6, degrees.
-LIMITS_DEG = ((-160, 160), (-180, 0), (0, 180), (-123, 81), (-85, 85), (-145, 145))
+GRIPPER_MAX_MM = 100.0  # the driver's gripper runs 0..1; carried as mm
+LIMITS_DEG = ((-160, 160), (-180, 0), (0, 180), (-123, 81), (-85, 85), (-145, 145))  # joint1..joint6
 LIMITS_RAD = [(math.radians(lo), math.radians(hi)) for lo, hi in LIMITS_DEG]
-PARK_LAG_RAD = math.radians(10)  # a joint this far behind its park target is blocked: stop and hold
-PARK_TOL_RAD = math.radians(3)  # within this of rest counts as parked
+PARK_LAG_RAD = math.radians(10)  # a parking joint further behind than this is blocked
+PARK_TOL_RAD = math.radians(3)  # this close to rest counts as arrived
 
 
 def arm_fields(side: str) -> list[str]:
-    """One arm's seven `portal.yaml` fields, in SDK order."""
+    """One arm's seven `portal.yaml` fields."""
     return [f"{side}_joint{i}.pos" for i in range(1, 7)] + [f"{side}_gripper.pos"]
 
 
@@ -37,58 +35,49 @@ def clamp_to_limits(action: dict[str, float]) -> dict[str, float]:
     """Every joint inside its soft limit, every gripper inside its stroke."""
     out = dict(action)
     for side in SIDES:
-        *joints, gripper = arm_fields(side)
-        for name, (lo, hi) in zip(joints + [gripper], LIMITS_RAD + [(0.0, GRIPPER_MAX_MM)]):
+        for name, (lo, hi) in zip(arm_fields(side), LIMITS_RAD + [(0.0, GRIPPER_MAX_MM)]):
             if name in out:
                 out[name] = min(max(out[name], lo), hi)
     return out
 
 
 def _gripper_deg(side: str, which: str) -> float:
-    """The gripper motor's angle at the jaws' OPEN or CLOSED end, degrees, measured per arm, from the env."""
+    """The gripper motor's angle with the jaws fully OPEN or CLOSED, per arm or shared."""
     raw = env_str(f"METAL_{side.upper()}_GRIPPER_{which}_DEG", env_str(f"METAL_GRIPPER_{which}_DEG", ""))
     if not raw:
-        raise RuntimeError(f"{side} arm: set METAL_GRIPPER_{which}_DEG (see tutorial/01-first-recording.md)")
+        raise RuntimeError(f"{side} arm: set METAL_GRIPPER_{which}_DEG (tutorial/01-first-recording.md)")
     return float(raw)
 
 
-def _arm_command(positions_rad: np.ndarray, gripper: float):
-    from robots import types  # lazy: keep `import utils.metal` free of the hardware stack
-
-    return types.ArmCommand(positions_rad=positions_rad, gripper=gripper)
-
-
 class Arm:
-    """One Metal arm over Dream's `robots` follower; `read()` returns None on a hiccup, never raising.
-
-    A follower is energized; a leader opens read-only, moved by hand. The gripper crosses as 0..1, carried as mm.
-    """
+    """One arm. `read()` returns None on a hiccup instead of raising."""
 
     def __init__(self, side: str, can_channel: str, leader: bool) -> None:
         self.side, self.can_channel, self.leader = side, can_channel, leader
         self.errors = 0
-        self.rest: list[float] | None = None  # the joints as opened: where park() returns the arm
+        self.energized = False
+        self.rest: list[float] | None = None  # the joints when opened: where park() returns
         self._arm = None  # robots.followers.FollowerArm
 
     def connect(self, energize: bool | None = None) -> None:
-        """Open the arm: a follower energized, a leader read-only, unless `energize` says otherwise."""
+        """Open the arm: energized for a follower, read-only for a leader, unless `energize` says otherwise."""
         try:
             from robots import config, metal, motor_arm, robstride
         except ImportError as exc:
-            raise RuntimeError("dreamlabs is not installed: run `uv sync` (see tutorial/01-first-recording.md)") from exc
+            raise RuntimeError("dreamlabs is not installed: run `uv sync`") from exc
+        energize = not self.leader if energize is None else energize
         cfg = config.ArmConfig(
             can_channel=self.can_channel,
-            home=(0.0,) * 6,  # the loop reads the real pose; never homes
+            home=(0.0,) * 6,  # never homed: the loop starts from the measured pose
             gripper_open_deg=_gripper_deg(self.side, "OPEN"),
             gripper_closed_deg=_gripper_deg(self.side, "CLOSED"),
             gripper_hold_torque_nm=env_float("METAL_GRIPPER_HOLD_NM", 0.5),
         )
-        self._arm = motor_arm.open_arm(
-            metal.ARM, cfg, self.side, opener=robstride.open_can_bus, energize=not self.leader if energize is None else energize
-        )
+        self._arm = motor_arm.open_arm(metal.ARM, cfg, self.side, opener=robstride.open_can_bus, energize=energize)
+        self.energized = energize
         if (reading := self.read()) is None:
-            raise RuntimeError(f"{self.side} arm: no pose after opening on {self.can_channel}")
-        self.rest = reading[:6]  # start the robot with the arms resting: this is where they park
+            raise RuntimeError(f"{self.side} arm: no pose after opening {self.can_channel}")
+        self.rest = reading[:6]
 
     def read(self) -> list[float] | None:
         try:
@@ -104,40 +93,45 @@ class Arm:
             return None
 
     def command(self, values: list[float]) -> None:
+        from robots import types
+
         gripper = min(max(values[6] / GRIPPER_MAX_MM, 0.0), 1.0)
-        self._arm.write(_arm_command(np.asarray(values[:6], dtype=np.float64), gripper))
+        self._arm.write(types.ArmCommand(positions_rad=np.asarray(values[:6], dtype=np.float64), gripper=gripper))
 
     def switch_off(self) -> None:
-        """The driver's torque off: parks where the arm was opened, then disables. Call only once it is there."""
+        """The driver's torque off, which parks where the arm was opened first. Call it once the arm is there."""
         self._arm.torque_off()
+        self.energized = False
 
     def close(self) -> None:
-        """Release the driver without moving the arm (a follower keeps holding its last target)."""
+        """Release the driver; an energized arm keeps holding its last target."""
         if self._arm is not None:
             self._arm.close()
+            self._arm = None
 
 
 class Camera:
     """A USB camera that serves its last good frame through a hiccup."""
 
     def __init__(self, name: str, cam) -> None:
-        self.name, self._cam, self._last = name, cam, None
+        self.name, self._cam, self._last, self.errors = name, cam, None, 0
 
     def read(self):
         try:
             self._last = self._cam.read_latest(max_age_ms=500)
         except Exception as exc:
-            logger.warning("%s: %s; serving the last frame", self.name, exc)
+            self.errors += 1
+            if self.errors == 1 or self.errors % 30 == 0:
+                logger.warning("%s: %s; serving the last frame (%d so far)", self.name, exc, self.errors)
         return self._last
 
 
 class StepLimiter:
     """Moves each joint target at most `max_step` rad per command, so an arm never jumps.
 
-    It ramps the TARGET and never clamps the tracking error: under impedance
-    control the error is the torque, and capping it can leave a joint stuck.
-    The ramp starts from the measured pose, and again after a pause in commands.
-    Grippers are not ramped.
+    It ramps the TARGET and never clamps the tracking error: under impedance control the error is
+    the torque, and capping it can leave a joint stuck. The ramp restarts from the measured pose
+    after a pause in commands. Grippers are not ramped.
     """
 
     MAX_LAG = 0.5  # rad the target may lead a joint that cannot follow
@@ -153,7 +147,7 @@ class StepLimiter:
     def step(self, action: dict[str, float]) -> dict[str, float]:
         now = time.monotonic()
         if now - self._last > self.PAUSE_S:
-            self._target = {}  # restart the ramp from the measured pose
+            self._target = {}
         self._last = now
         if self.max_step <= 0:
             return dict(action)
@@ -182,17 +176,35 @@ def _read_pair(arms: dict[str, Arm]) -> dict[str, float]:
 
 
 class Followers:
-    """Both followers and the cameras, behind `get_observation()` and `send_action()`."""
+    """Both followers and the cameras, behind `get_observation()` and `send_action()`.
+
+    Parked, the arms are switched off at rest and open read-only: state keeps flowing, actions are ignored.
+    """
 
     def __init__(self, arms: dict[str, Arm], cameras: dict[str, Camera], limiter: StepLimiter) -> None:
         self.arms, self.cameras, self.limiter = arms, cameras, limiter
-        self.parked = False  # switched off at rest, open read-only: state flows, actions are ignored
+        self.parked = False
 
     def connect(self) -> None:
         for camera in self.cameras.values():
             camera._cam.connect()
-        for arm in self.arms.values():
-            arm.connect()
+        self._open_arms(energize=True)
+
+    def _open_arms(self, energize: bool) -> None:
+        """Open every arm, or none: an arm already energized when another fails is switched off where it
+        was opened, so the next start does not find it powered."""
+        try:
+            for arm in self.arms.values():
+                arm.connect(energize)
+        except Exception:
+            for arm in self.arms.values():
+                try:
+                    if arm.energized:
+                        arm.switch_off()
+                    arm.close()
+                except Exception as exc:
+                    logger.warning("%s arm: could not switch off after a failed open (%s); support it", arm.side, exc)
+            raise
 
     def get_observation(self) -> tuple[dict[str, float], dict]:
         """(state, frames). State is {} while an arm is unreadable; frames keep flowing."""
@@ -211,17 +223,18 @@ class Followers:
                 arm.command([target[name] for name in fields])
 
     def park(self, fps: int) -> None:
-        """Walk both arms back to the pose they were opened in, slowly, switch them off, and reopen them read-only.
+        """Walk both arms back to where they were opened, switch them off, and reopen them read-only.
 
-        Blocking; run it on the hardware thread with no actions applied. Raises with the arms holding
-        where they are if an arm is unreadable, falls behind its target (blocked), or does not arrive.
+        Blocking: run it on the hardware thread. Raises, leaving the arms holding, if an arm is
+        unreadable, blocked (more than PARK_LAG_RAD behind), or short of its rest pose.
         """
+        if self.parked:
+            return
         step = math.radians(env_float("METAL_PARK_DEG_S", 10.0)) / fps
         present = {side: arm.read() for side, arm in self.arms.items()}
         if any(value is None for value in present.values()):
             raise RuntimeError("an arm is unreadable; not parking")
         target = {side: value[:6] for side, value in present.items()}
-        grip = {side: value[6] for side, value in present.items()}
         settled = 0
         while settled < fps:  # one second at rest after the targets arrive
             started = time.monotonic()
@@ -229,11 +242,10 @@ class Followers:
             for side, arm in self.arms.items():
                 target[side] = [t + min(max(r - t, -step), step) for t, r in zip(target[side], arm.rest)]
                 arrived &= all(abs(r - t) < 1e-9 for t, r in zip(target[side], arm.rest))
-                arm.command(target[side] + [grip[side]])
+                arm.command(target[side] + [present[side][6]])
                 if (reading := arm.read()) is None:
                     continue
-                lag = max(abs(t - q) for t, q in zip(target[side], reading[:6]))
-                if lag > PARK_LAG_RAD:
+                if (lag := max(abs(t - q) for t, q in zip(target[side], reading[:6]))) > PARK_LAG_RAD:
                     arm.command(reading)
                     raise RuntimeError(f"{side} arm is {math.degrees(lag):.0f} deg behind its park target "
                                        "(blocked?); holding where it is")
@@ -247,14 +259,18 @@ class Followers:
             arm.switch_off()
         self.parked = True
         for arm in self.arms.values():
-            arm.connect(energize=False)  # read-only, motors stay off: state keeps flowing
+            arm.close()
+        self._open_arms(energize=False)
 
     def unpark(self) -> None:
-        """Power the parked arms up again, holding where they rest (which becomes the new park pose)."""
+        """Power the parked arms up, holding where they rest (the new park pose)."""
         for arm in self.arms.values():
             arm.close()
-        for arm in self.arms.values():
-            arm.connect(energize=True)
+        try:
+            self._open_arms(energize=True)
+        except Exception:
+            self._open_arms(energize=False)  # stay parked and readable
+            raise
         self.limiter.present.clear()  # never command before a fresh read
         self.parked = False
 
@@ -262,7 +278,7 @@ class Followers:
         for camera in self.cameras.values():
             camera._cam.disconnect()
         for arm in self.arms.values():
-            arm.close()  # never disables the motors; park() is the one way to switch them off
+            arm.close()
 
 
 class Leaders:
@@ -283,16 +299,14 @@ class Leaders:
             arm.close()
 
 
-def _arms(role: str, default_can: dict[str, str]) -> dict[str, Arm]:
-    return {side: Arm(side, env_str(f"METAL_{role}_{side.upper()}_CAN", default_can[side]), leader=role == "LEADER")
+def _arms(role: str) -> dict[str, Arm]:
+    """One arm per side, on the link `METAL_<ROLE>_<SIDE>_CAN` names; required, so arms never swap silently."""
+    return {side: Arm(side, required_env(f"METAL_{role}_{side.upper()}_CAN"), leader=role == "LEADER")
             for side in SIDES}
 
 
 def build_followers(tracks: list[str], fps: int) -> Followers:
-    """Followers on can1 (right) and can3 (left), the vendor's layout; one camera per video track.
-
-    Track `<name>_camera` reads its device from `METAL_CAM_<NAME>`.
-    """
+    """The followers, and one camera per video track: `<name>_camera` opens `METAL_CAM_<NAME>`."""
     from lerobot.cameras import Cv2Backends
     from lerobot.cameras.opencv import OpenCVCamera, OpenCVCameraConfig
 
@@ -305,22 +319,24 @@ def build_followers(tracks: list[str], fps: int) -> Followers:
             backend=Cv2Backends.V4L2 if platform.system() == "Linux" else Cv2Backends.ANY,
         )
         cameras[name] = Camera(name, OpenCVCamera(config))
-    limiter = StepLimiter(env_float("METAL_MAX_STEP_RAD", 0.087))
-    return Followers(_arms("FOLLOWER", {"left": "can3", "right": "can1"}), cameras, limiter)
+    return Followers(_arms("FOLLOWER"), cameras, StepLimiter(env_float("METAL_MAX_STEP_RAD", 0.087)))
 
 
-def check_arms(role: str = "FOLLOWER") -> None:
-    """Open each configured arm read-only (motors off) and print its joints until ctrl-c: move one to see which."""
-    arms = _arms(role, {"left": "can3", "right": "can1"} if role == "FOLLOWER" else {"left": "can2", "right": "can0"})
+def build_leaders() -> Leaders:
+    return Leaders(_arms("LEADER"))
+
+
+def check_arms() -> None:
+    """Print the followers' joints twice a second, motors off, until ctrl-c: move an arm to see its link."""
+    arms = _arms("FOLLOWER")
     for arm in arms.values():
-        arm.leader = True  # read-only: never energized
-        arm.connect()
+        arm.connect(energize=False)
     try:
         while True:
             for side, arm in arms.items():
                 if (values := arm.read()) is not None:
-                    joints = " ".join(f"{math.degrees(v):+6.0f}" for v in values[:6])
-                    print(f"{side:5s} {arm.can_channel}: joints {joints} deg, gripper {values[6]:5.1f}")
+                    joints = " ".join(f"{math.degrees(v):+5.0f}" for v in values[:6])
+                    print(f"{side:5s} on {arm.can_channel}: joints {joints} deg, gripper {values[6]:3.0f} mm")
             print()
             time.sleep(0.5)
     except KeyboardInterrupt:
@@ -328,8 +344,3 @@ def check_arms(role: str = "FOLLOWER") -> None:
     finally:
         for arm in arms.values():
             arm.close()
-
-
-def build_leaders() -> Leaders:
-    """Leaders on can0 (right) and can2 (left), the vendor's layout."""
-    return Leaders(_arms("LEADER", {"left": "can2", "right": "can0"}))

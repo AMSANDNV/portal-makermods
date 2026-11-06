@@ -63,6 +63,11 @@ class Dream1Tests(unittest.TestCase):
             with self.assertRaises(dream.DreamError):
                 dream1.chunk_rows({"q_l_chunk": np.zeros((48, 7)), "q_r_chunk": bad})
 
+    def test_network_errors_are_retried_and_bad_replies_are_not(self):
+        self.assertEqual(dream1.retry_delay(ConnectionResetError("reset by peer")), 1.0)
+        with self.assertRaises(dream.DreamError):
+            dream1.retry_delay(dream.DreamActionError("bad chunk"))
+
 
 if __name__ == "__main__":
     unittest.main()

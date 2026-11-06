@@ -1,15 +1,11 @@
-"""Operator side: two Metal leaders -> Portal actions, and a window to fly by.
+"""Operator side: two Metal leaders as Portal actions, and a window to fly by.
 
-Run with `uv run teleoperator`. Each tick reads both leaders (floating in
-gravity compensation) as one action and sends it. Nothing is recorded here: `src/recorder.py` writes the archive, and
-this process marks where takes start and end with keypoints.
+Run with `uv run teleoperator`. Each tick reads both leaders (moved by hand, motors off) as one
+action, filed against the frame on screen (`in_reply_to_ts_us`). The recorder writes the archive;
+this process only marks takes with keypoints. See tutorial/06-operator-loop.md.
 
-Every action names the frame it answers in `in_reply_to_ts_us`: the operator
-flies on video, which is usually a tick or two behind the state.
-See tutorial/06-operator-loop.md.
-
-Hotkeys: `c` cycle control, `p` park the arms (again: power them up), `r` toggle recording, `[` discard the take, `x` quit,
-`1`-`9` switch task.
+Keys: `c` cycle control, `p` park or power up the arms, `r` start/end a take, `[` discard it,
+`1`-`9` switch task, `x` quit.
 """
 from __future__ import annotations
 
@@ -18,7 +14,8 @@ import time
 from collections import deque
 from typing import Optional
 
-from utils.common import request_park, CONFIG_PATH, TELEOPERATOR_IDENTITY, HardwareThread, env_int, load_env, mint_token, pace, required_env
+from utils.common import (CONFIG_PATH, TELEOPERATOR_IDENTITY, HardwareThread, env_int, load_env, mint_token, pace,
+                          request_park, required_env)
 from livekit.portal import Operator, OperatorConfig, VideoFrameData, frame_bytes_to_numpy_rgb
 from utils.hotkeys import Hotkeys, input_backend_warning
 from utils.metal import build_leaders

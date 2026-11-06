@@ -59,15 +59,35 @@ class TrackingArm(FakeArm):
         self.off = True
 
 
+def fake_connect(a, driver, fails=False):
+    """Stand in for `Arm.connect`: reattach `driver` (or raise), and log each open's energize flag."""
+    a.opened = []
+
+    def connect(energize=None):
+        if fails:
+            raise OSError("CAN adapter did not open")
+        a.opened.append(energize)
+        a._arm, a.energized = driver, energize
+    a.connect = connect
+
+
 def parking(blocked=False):
     arms = {}
     for side in ("left", "right"):
         arms[side] = Arm(side, "can0", leader=False)
         arms[side]._arm = TrackingArm([0.5, -1.0, 1.0, 0.2, 0.0, 0.0, 30.0], blocked and side == "left")
+        arms[side].energized = True
         arms[side].rest = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        arms[side].opened = []  # each reopen's energize flag, instead of a real driver
-        arms[side].connect = lambda energize=None, opened=arms[side].opened: opened.append(energize)
+        fake_connect(arms[side], arms[side]._arm)
     return Followers(arms, {}, StepLimiter(0.1))
+
+
+def raises(fn, *args):
+    try:
+        fn(*args)
+    except Exception:
+        return True
+    return False
 
 
 class FakeCamera:
@@ -156,25 +176,29 @@ def main() -> int:
             "unpark reopens the arms energized")
     steps = [abs(b[1] - a[1]) for a, b in zip(p.arms["right"]._arm.commands, p.arms["right"]._arm.commands[1:])]
     c.check(max(steps) <= math.radians(30) + 1e-9, "park never jumps more than one step per tick", f"{max(steps):.3f}")
+    p = parking()
+    p.park(fps=100)
+    before = len(p.arms["left"]._arm.commands)
+    p.park(fps=100)  # a second ctrl-c queues another park behind the first
+    c.check(len(p.arms["left"]._arm.commands) == before, "parking a parked robot does nothing")
 
     p = parking(blocked=True)
-    try:
-        p.park(fps=100)
-        raised = False
-    except RuntimeError:
-        raised = True
-    c.check(raised and not any(a._arm.off for a in p.arms.values()),
+    c.check(raises(p.park, 100) and not any(a._arm.off for a in p.arms.values()),
             "a blocked arm stops the park: nothing is switched off")
 
     p = parking()
     p.arms["right"]._arm.raises = True
-    try:
-        p.park(fps=100)
-        raised = False
-    except RuntimeError:
-        raised = True
-    c.check(raised and not p.arms["left"]._arm.commands and not p.arms["left"]._arm.off,
+    c.check(raises(p.park, 100) and not p.arms["left"]._arm.commands and not p.arms["left"]._arm.off,
             "an unreadable arm: no park, nothing moves, nothing switched off")
+
+    p = parking()
+    for a in p.arms.values():
+        a._arm, a.energized = None, False
+    left = TrackingArm([0.0] * 7)
+    fake_connect(p.arms["left"], left)
+    fake_connect(p.arms["right"], None, fails=True)
+    c.check(raises(p._open_arms, True) and left.off,
+            "one arm fails to open: the one already energized is switched off where it opened")
     return c.exit_code
 
 

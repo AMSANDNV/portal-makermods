@@ -42,8 +42,8 @@ Read these after completing the walkthrough, or when you need to change the code
 | [09. Reference](tutorial/09-reference.md) | Settings, alternatives, and troubleshooting |
 
 **Metal arms have no brakes.** Start the robot with the followers resting: that is
-where they park. `p` parks them (walk back, switch off) and powers them up again;
-Ctrl-C on the robot parks before it exits. A fault never disables the motors.
+where they park. `p` parks them (walk back, switch off) or powers them up, and the
+robot parks before every exit. A fault never switches the motors off.
 
 The runnable peers are in `src/`; policies are in `src/policies/`.
 All peers share [`portal.yaml`](portal.yaml).

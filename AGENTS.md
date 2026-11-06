@@ -28,11 +28,12 @@ Update affected chapters with behavior changes.
   both archive timelines; let Portal stamp synchronized action send times.
 - Run blocking hardware or inference off the event loop. Device calls must be
   serialized and finished before disconnecting hardware.
-- Never disable the Metal motors on a fault: the arms are brakeless and drop. They switch off only
-  through a park (`p`, or the robot's Ctrl-C): walk to the pose captured at startup, verify, then
-  disable. A park that cannot finish leaves them holding.
+- The Metal arms are brakeless: never disable the motors on a fault. They switch off only through
+  a park (`p`, or any robot exit): walk to the pose captured at startup, verify, then disable. A park
+  that cannot finish leaves them holding. Opening is both arms or neither.
 - Preserve the soft-limit clamp, the target-step limiter, and both-arms-or-nothing reads. A small clamp on
   tracking error limits torque under MIT control and can immobilize joints.
+- CAN links come from `.env` with no defaults, so a missing setting fails instead of swapping arms.
 - Check installed library APIs when restoring older examples.
 
 ## Checks
