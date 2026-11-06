@@ -14,7 +14,8 @@ repository version and `portal.yaml` on both. Other layouts are covered in the
    overhead, left wrist, and right wrist. Left and right are from the robot's view.
 2. Connect one USB-CAN adapter per arm. This walkthrough uses SLCAN serial
    adapters, which Dream's driver opens directly at 1 Mbps. No manual CAN startup
-   is needed. For adapters already exposed as `can0`, see the
+   is needed. candleLight (`gs_usb`) adapters appear as `can0`, `can1`, ...
+   instead; set them up with the
    [SocketCAN alternative](09-reference.md#socketcan-alternative).
 3. Support the arms before powering them. Leaders are read-only and must be
    supported by hand; followers hold their pose under power. The arms have no brakes.
@@ -101,6 +102,9 @@ METAL_LEADER_LEFT_CAN=/dev/serial/by-id/LEFT_ADAPTER_ID
 
 Use the stable paths rather than `/dev/ttyACM0`, whose number can change after
 reconnecting. If no unique paths appear, see [serial adapter setup](09-reference.md#serial-adapter-setup).
+If `/dev/serial/by-id/` is empty and `lsusb` lists a `candleLight USB to CAN
+adapter`, use the [SocketCAN alternative](09-reference.md#socketcan-alternative)
+and set the two variables to the `canN` names instead.
 
 On Ubuntu, grant your user serial access once on each host:
 
@@ -114,11 +118,15 @@ programs and `dreamcli robot up` stopped; Portal runs the control loop here.
 If a vendor `slcand` service already owns the adapter, follow the
 [existing-adapter instructions](09-reference.md#serial-adapter-setup).
 
-On the **robot host**, list cameras:
+On the **robot host**, list cameras (`v4l2-ctl` comes with `v4l-utils`):
 
 ```bash
+sudo apt install v4l-utils
 v4l2-ctl --list-devices
 ```
+
+Each USB camera lists two devices; use the first. To tell the views apart, run
+`uv run recorder --observe-only` once the robot is up (section 4).
 
 Set its `.env` camera paths to the devices listed for each view:
 
@@ -153,6 +161,8 @@ Leave each command running in its own terminal. Start them in this order:
    ```
 
 Wait for all three camera views and the recorder's output path before continuing.
+To look at the room from any machine with the repo and `.env`, run
+`uv run recorder --observe-only`: it opens a Rerun window and writes nothing.
 The robot must connect first because the other processes wait for its clock.
 
 ## 5. Check human control

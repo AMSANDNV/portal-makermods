@@ -64,12 +64,22 @@ Existing rigs can keep their configured `canN` interfaces. Set each
 `METAL_{FOLLOWER,LEADER}_{LEFT,RIGHT}_CAN` to the interface for that arm.
 Dream expects these links to be up at 1 Mbps before Portal starts.
 
-For **native SocketCAN** adapters, bring up each interface that is down
-(replace `can0` with its actual name):
+For **native SocketCAN** adapters such as candleLight (`gs_usb`), bring up
+each interface that is down (replace `can0` with its actual name):
 
 ```bash
+ip -br link show type can
 sudo ip link set can0 up type can bitrate 1000000
 ```
+
+- **The adapter is in `lsusb` but no `canN` appears:** a program that opened it
+  over USB directly can leave it detached from the kernel driver. Reload the
+  driver with `sudo modprobe -r gs_usb && sudo modprobe gs_usb`, then bring the
+  links up again.
+- **Which link is which arm:** `canN` names follow USB enumeration and can swap
+  after a reboot or replug. Identify each arm as in chapter 1, connecting one
+  adapter at a time, and check again after replugging.
+- **After a reboot:** the links come back down; run the `ip link` command again.
 
 For **serial adapters managed by MakerMods' SDK**, use its adapter setup and
 startup scripts instead. Its `start_can0.sh` creates a CAN link with `slcand`,

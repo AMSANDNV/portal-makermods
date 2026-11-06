@@ -1002,15 +1002,15 @@ wheels = [
 
 [[package]]
 name = "livekit-portal"
-version = "0.3.0rc2"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/dc/ae/a141c1f7348757a84c54ebfe0e51f807fa5cc2c94bf2d41e3061d6864e29/livekit_portal-0.3.0rc2-cp312-cp312-macosx_26_0_arm64.whl", hash = "sha256:7aaf2f3cbe362b251d23fe0a75aebb5186ccb4815153b2f4922a8f5295229257", size = 12056604, upload-time = "2026-11-03T03:51:19.093Z" },
-    { url = "https://files.pythonhosted.org/packages/ec/f5/9d77575715cb1610450ac169a2e3ab17f7aa7ddd05cc34aab7164f742149/livekit_portal-0.3.0rc2-cp312-cp312-manylinux_2_35_aarch64.whl", hash = "sha256:7ed72f0aa58c05594a36871db266a3156c4e9d7a9856785072411b770a0b1cf6", size = 13673401, upload-time = "2026-11-03T03:51:22.212Z" },
-    { url = "https://files.pythonhosted.org/packages/bb/6a/c6bcaf95161462fa3a48c68fd4c23325341dc5cb56c2b8490b128f51c611/livekit_portal-0.3.0rc2-cp312-cp312-manylinux_2_35_x86_64.whl", hash = "sha256:8f813d3eed47471cf6e3c24246f451e4142ced33037ec1cba263b0556f6f7c79", size = 14633909, upload-time = "2026-11-03T03:51:24.983Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/67/94cf2d640f4f1801ac4dd5300814758376a13ffe00694e6e5d89304fef54/livekit_portal-0.3.0-cp312-cp312-macosx_26_0_arm64.whl", hash = "sha256:2ccd2f2afbf5ba57835f7cece1f37fde54f8d35b37aeebaa663c526086b216b2", size = 12056776, upload-time = "2026-11-06T05:55:30.4Z" },
+    { url = "https://files.pythonhosted.org/packages/16/df/a49ef50debb02e6c204ade07e1bfc06365227d69f1c7042637c5721638dc/livekit_portal-0.3.0-cp312-cp312-manylinux_2_35_aarch64.whl", hash = "sha256:1aadcc1f919454c06104f52341010dbad8b78395ab8e8e94543b59efd3bad20f", size = 13673411, upload-time = "2026-11-06T05:55:33.771Z" },
+    { url = "https://files.pythonhosted.org/packages/47/72/0b8a6c6cb44d83e7a3fd15e09181aaf56ebdad8735015ea630ce6c6cdb0d/livekit_portal-0.3.0-cp312-cp312-manylinux_2_35_x86_64.whl", hash = "sha256:4e35569ee21d06c114816fa85ee2e8b8b681ae39984944c0e9c21c0e21e760d0", size = 14646392, upload-time = "2026-11-06T05:55:37.47Z" },
 ]
 
 [package.optional-dependencies]
@@ -1646,7 +1646,7 @@ requires-dist = [
     { name = "dreamlabs-client", specifier = ">=1.0.14" },
     { name = "lerobot", extras = ["hardware"], specifier = ">=0.6.1" },
     { name = "livekit-api", specifier = ">=0.7" },
-    { name = "livekit-portal", extras = ["rerun", "lerobot"], specifier = ">=0.3.0rc2" },
+    { name = "livekit-portal", extras = ["rerun", "lerobot"], specifier = ">=0.3.0" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "opencv-python", specifier = ">=4.5" },
     { name = "pynput", specifier = ">=1.7" },
