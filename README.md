@@ -14,7 +14,7 @@ Follow these chapters in order:
 To collect human-only demonstrations instead, see the
 [alternative recording path](tutorial/09-reference.md#human-only-demonstrations).
 
-You need two Metal leaders, two Metal followers, three USB cameras, Linux hardware
+You need two Star Arm 102 leaders, two Metal followers, three USB cameras, Linux hardware
 hosts, Python 3.12, `uv`, and a LiveKit server. ACT training also needs a CUDA
 machine. Dream-1 needs a Dream Labs API key.
 

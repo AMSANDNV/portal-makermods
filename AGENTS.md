@@ -8,8 +8,9 @@ Keep it small and readable. The README leads with the numbered `tutorial/`.
 
 - `src/robot.py`, `src/teleoperator.py`, and `src/recorder.py` show the Portal flows.
 - `src/utils/common.py` holds shared environment, token, and scheduling helpers.
-- `src/utils/metal.py` drives the Metal pair through Dream Labs' `robots` package (imported lazily):
-  followers energized, leaders read-only; `src/utils/` also holds preview, hotkey, and task-prompt details.
+- `src/utils/metal.py` drives the Metal followers through Dream Labs' `robots` package (imported lazily).
+- `src/utils/star.py` reads the Star Arm 102 leaders (FashionStar servos, motors off) in the followers'
+  units, adapted from MakerMods' lerobot fork. `src/utils/` also holds preview, hotkey, and task-prompt details.
 - `src/policies/act/` contains training (`train.py`), the operator (`run.py`, `uv run act`), and a SkyPilot example.
 - `src/policies/dream_1/` runs Dream Labs' Dream-1 (`run.py`, `uv run dream-1`) with the dream client's `metal` IK.
 - `test/` checks behavior without hardware.
@@ -33,7 +34,8 @@ Update affected chapters with behavior changes.
   that cannot finish leaves them holding. Opening is both arms or neither.
 - Preserve the soft-limit clamp, the target-step limiter, and both-arms-or-nothing reads. A small clamp on
   tracking error limits torque under MIT control and can immobilize joints.
-- CAN links come from `.env` with no defaults, so a missing setting fails instead of swapping arms.
+- CAN links and leader ports come from `.env` with no defaults, so a missing setting fails instead of swapping arms.
+- A leader read with any servo missing or held (`reliable=False`) is no read at all.
 - Check installed library APIs when restoring older examples.
 
 ## Checks

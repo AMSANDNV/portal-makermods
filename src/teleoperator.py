@@ -1,4 +1,4 @@
-"""Operator side: two Metal leaders as Portal actions, and a window to fly by.
+"""Operator side: two Star Arm 102 leaders as Portal actions, and a window to fly by.
 
 Run with `uv run teleoperator`. Each tick reads both leaders (moved by hand, motors off) as one
 action, filed against the frame on screen (`in_reply_to_ts_us`). The recorder writes the archive;
@@ -6,9 +6,13 @@ this process only marks takes with keypoints. See tutorial/06-operator-loop.md.
 
 Keys: `c` cycle control, `p` park or power up the arms, `r` start/end a take, `[` discard it,
 `1`-`9` switch task, `x` quit.
+
+`uv run teleoperator --check-leaders` prints the leaders in follower units; `--zero-leaders` sets their
+zero pose, once per build.
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import time
 from collections import deque
@@ -18,9 +22,9 @@ from utils.common import (CONFIG_PATH, TELEOPERATOR_IDENTITY, HardwareThread, en
                           request_park, required_env)
 from livekit.portal import Operator, OperatorConfig, VideoFrameData, frame_bytes_to_numpy_rgb
 from utils.hotkeys import Hotkeys, input_backend_warning
-from utils.metal import build_leaders
 from utils.rerun_view import Preview
 from utils.session import prompt_tasks
+from utils.star import build_leaders, check_leaders, zero_leaders
 
 # The keypoint types `livekit-portal convert` cuts episodes at by default.
 RECORDING, IDLE, DISCARD = "recording", "idle", "discard"
@@ -234,6 +238,14 @@ async def main() -> None:
 
 
 def run() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--check-leaders", action="store_true", help="print the leaders' joints in follower units")
+    parser.add_argument("--zero-leaders", action="store_true", help="set the leaders' zero pose")
+    args = parser.parse_args()
+    if args.check_leaders or args.zero_leaders:
+        load_env()
+        (zero_leaders if args.zero_leaders else check_leaders)()
+        return
     asyncio.run(main())
 
 

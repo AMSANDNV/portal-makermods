@@ -21,10 +21,8 @@ then use the running teleoperator and recorder:
 ## Other host layouts
 
 The walkthrough uses separate robot and teleop hosts. You can run all three
-peers on one Linux machine if it has the required CAN adapters and cameras.
-If leader and follower gripper measurements differ, give robot and teleop
-separate working directories with their own `.env.local` values. Start each
-process from its directory; relative output paths follow that directory.
+peers on one Linux machine if it has the required CAN adapters, leader ports,
+and cameras.
 
 You can also run the recorder or policy on another machine. Copy the repository,
 run `uv sync`, and configure the same LiveKit server, room, and `portal.yaml`.
@@ -133,7 +131,8 @@ shell values. Relative output paths use the working directory.
 | `METAL_GRIPPER_CLOSED_DEG`, `METAL_GRIPPER_OPEN_DEG` | required | gripper motor angle with the jaws closed / open; per arm as `METAL_{LEFT,RIGHT}_GRIPPER_*_DEG` |
 | `METAL_GRIPPER_HOLD_NM` | `0.5` | the gripper's holding torque on an object, N.m |
 | `METAL_FOLLOWER_LEFT_CAN`, `METAL_FOLLOWER_RIGHT_CAN` | required on the robot host | serial path or SocketCAN link per arm |
-| `METAL_LEADER_LEFT_CAN`, `METAL_LEADER_RIGHT_CAN` | required on the teleop host | serial path or SocketCAN link per arm |
+| `STAR_LEADER_LEFT_PORT`, `STAR_LEADER_RIGHT_PORT` | required on the teleop host | each Star Arm 102 leader's USB serial path |
+| `STAR_GRIPPER_TRAVEL_DEG` | `41.2` | the leader gripper servo's turn from closed to open: `41.2` vertical grip, about `60.7` stock lever; negative if the grip turns the other way |
 | `METAL_PARK_DEG_S` | `10` | joint speed while parking |
 | `METAL_CAM_OVERHEAD`, `METAL_CAM_LEFT_WRIST`, `METAL_CAM_RIGHT_WRIST` | `/dev/video0`, `/dev/video2`, `/dev/video4` | Linux camera device path. |
 | `METAL_CAM_WIDTH` / `_HEIGHT` | `640` / `480` | a 16:9 mode such as 1280x720 suits Dream-1 better; it center-crops otherwise |
@@ -184,7 +183,15 @@ CUDA/MPS/CPU automatically, and waits for the `c` handoff before producing actio
   [CAN adapters](#can-adapters). `set METAL_GRIPPER_..._DEG` means a gripper
   angle is missing from `.env`.
 - **The wrong arm moves.** Left and right are swapped in `.env`: check with
-  `uv run robot --check-arms` and swap the two values.
+  `uv run robot --check-arms` or `uv run teleoperator --check-leaders` and swap
+  the two values.
+- **A leader does not open.** `servo N does not answer`: check its
+  `STAR_LEADER_*_PORT`, its USB cable and power, and serial permissions.
+- **A follower is offset from its leader, or a joint runs backwards.** Zero the
+  leaders again in the followers' zero pose
+  ([chapter 1](01-first-recording.md#the-leaders)).
+- **The follower gripper never fully opens or closes.** Set
+  `STAR_GRIPPER_TRAVEL_DEG` for your leader's grip.
 - **`the gripper stops opening at N deg`.** The open angle is past the real
   stop; set that arm's `METAL_*_GRIPPER_OPEN_DEG` to N.
 - **A park stopped.** The robot names the arm and the reason; the arms hold.

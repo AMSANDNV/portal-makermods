@@ -23,6 +23,12 @@ if action := await hardware.run(leaders.get_action):
     op.send_action(action, in_reply_to_ts_us=view.anchor())
 ```
 
+`leaders.get_action()` reads both Star Arm 102 leaders
+([`src/utils/star.py`](../src/utils/star.py)) and converts their servo angles to
+the followers' units. It returns nothing unless every servo on both leaders
+answered this tick: the servo library otherwise repeats a missed servo's last
+angle, which would hold a follower on a stale target.
+
 `View.anchor()` is the oldest of the latest camera timestamps, so it follows the
 slowest of the three views; it does not make their capture times simultaneous. It returns
 `None` until all cameras have produced a frame.

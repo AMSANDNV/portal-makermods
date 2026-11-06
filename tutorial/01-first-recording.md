@@ -11,17 +11,18 @@ repository, and both must reach one LiveKit server. Other layouts are in the
 
 ## 1. Prepare the hardware
 
-1. Mount two Metal followers, two Metal leaders, and three USB cameras:
+1. Mount two Metal followers, two Star Arm 102 leaders, and three USB cameras:
    overhead, left wrist, and right wrist. Left and right are as the robot sees
    them, standing behind the arms.
-2. Connect one USB-CAN adapter per arm.
+2. Connect one USB-CAN adapter per follower, and each leader's USB cable to the
+   teleop host.
 3. Rest the followers where they can go limp, such as folded on their stops.
    The robot records this pose when it starts and parks the arms there. The
    arms have no brakes: support any arm you power off by hand.
 4. In [MakerMods Lab](https://github.com/makermods-robotics/makermodslab),
-   check the joint zeros and measure each gripper motor's angle with the jaws
-   fully closed and fully open. Then **close MakerMods Lab**: it holds the
-   adapters while it runs.
+   check the followers' joint zeros and measure each follower gripper motor's
+   angle with the jaws fully closed and fully open. Then **close MakerMods Lab**:
+   it holds the adapters while it runs.
 
 ## 2. Install
 
@@ -49,8 +50,8 @@ and a gentle speed cap for bring-up. A `.env.local`, if present, overrides `.env
 
 ## 3. Name the arm adapters
 
-Each host needs its two adapters in `.env`. Find them with the adapters
-plugged in:
+Each host needs its two arms in `.env`. Find the followers' CAN adapters on the
+robot host with them plugged in:
 
 ```bash
 ls -l /dev/serial/by-id/      # serial (SLCAN) adapters
@@ -77,10 +78,7 @@ METAL_FOLLOWER_LEFT_CAN=can1
 METAL_FOLLOWER_RIGHT_CAN=can0
 ```
 
-and the teleop host's leaders the same way with `METAL_LEADER_LEFT_CAN` and
-`METAL_LEADER_RIGHT_CAN`.
-
-Then add the gripper angles you measured, on each host for its own arms:
+Then add the follower gripper angles you measured:
 
 ```dotenv
 METAL_GRIPPER_CLOSED_DEG=0
@@ -101,6 +99,40 @@ uv run robot --check-arms
 It reads the followers with their motors off and prints each one's joints
 twice a second. Move one arm by hand and watch which line changes. If it is the
 wrong side, swap the two values in `.env`. Stop it with Ctrl-C.
+
+### The leaders
+
+Each leader is a USB serial device. On the teleop host, list them with
+`ls -l /dev/serial/by-id/` and set:
+
+```dotenv
+STAR_LEADER_LEFT_PORT=/dev/serial/by-id/LEFT_LEADER_ID
+STAR_LEADER_RIGHT_PORT=/dev/serial/by-id/RIGHT_LEADER_ID
+```
+
+The leaders ship with MakerMods' vertical grip. If yours have the stock
+left-right lever instead, add `STAR_GRIPPER_TRAVEL_DEG=60.7`.
+
+**Zero the leaders once per build.** Each servo stores its zero, so this
+survives restarts. Hold both leaders in the followers' zero pose, where
+`uv run robot --check-arms` reads 0 on every joint, with the grippers closed, and run:
+
+```bash
+uv run teleoperator --zero-leaders
+```
+
+Then check them:
+
+```bash
+uv run teleoperator --check-leaders
+```
+
+It prints each leader in the followers' units, the same way `--check-arms`
+does. Move one leader and watch which line changes; swap the two
+`STAR_LEADER_*_PORT` values if it is the wrong side. Then pose a leader and its
+follower alike, joint by joint: the two printouts should agree within a few
+degrees and move in the same direction. A joint that runs backwards or sits a
+constant offset away means the zero pose was off, so zero again.
 
 ## 4. Find the cameras
 
@@ -143,7 +175,7 @@ In the teleop terminal:
 2. Press `c` and confirm the teleoperator is selected.
 3. Move the leaders gently; both followers should track them. If moving the
    left leader moves the right follower, swap the teleop host's two
-   `METAL_LEADER_*_CAN` values and restart teleop.
+   `STAR_LEADER_*_PORT` values and restart teleop.
 4. Place the towel in the workspace and bring the arms to the starting pose.
 
 Leave everything running and continue to

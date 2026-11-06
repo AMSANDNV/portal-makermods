@@ -11,7 +11,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from utils.metal import GRIPPER_MAX_MM, LIMITS_RAD, Arm, Followers, Leaders, StepLimiter, arm_fields, clamp_to_limits
+from utils.metal import GRIPPER_MAX_MM, LIMITS_RAD, Arm, Followers, StepLimiter, arm_fields, clamp_to_limits
+from utils.star import Leaders, StarLeader, to_follower
 from test._harness import Checks
 
 HOME = [0.0, -1.2, 1.5, 0.0, 0.0, 0.0, 40.0]  # inside every soft limit; gripper 40 mm
@@ -74,7 +75,7 @@ def fake_connect(a, driver, fails=False):
 def parking(blocked=False):
     arms = {}
     for side in ("left", "right"):
-        arms[side] = Arm(side, "can0", leader=False)
+        arms[side] = Arm(side, "can0")
         arms[side]._arm = TrackingArm([0.5, -1.0, 1.0, 0.2, 0.0, 0.0, 30.0], blocked and side == "left")
         arms[side].energized = True
         arms[side].rest = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
@@ -96,8 +97,27 @@ class FakeCamera:
 
 
 def arm(side):
-    a = Arm(side, "can0", leader=False)
+    a = Arm(side, "can0")
     a._arm = FakeArm()
+    return a
+
+
+class FakeServoBus:
+    """Stands in for a `motorbridge_smart_servo.FashionStarServo` at `sync_monitor`.
+
+    `missing` servos come back the way the library returns a missed reply: the last angle, marked unreliable.
+    """
+
+    def __init__(self, angles):
+        self.angles, self.missing = angles, set()
+
+    def sync_monitor(self, ids):
+        return {i: SimpleNamespace(angle_deg=self.angles[i], reliable=i not in self.missing) for i in ids}
+
+
+def leader(side):
+    a = StarLeader(side, "/dev/ttyUSB0", 41.2)
+    a._bus = FakeServoBus([0.0, 60.0, -90.0, 0.0, 0.0, 0.0, 20.6])
     return a
 
 
@@ -154,10 +174,22 @@ def main() -> int:
     c.check(clamped["left_gripper.pos"] == GRIPPER_MAX_MM and clamped["right_gripper.pos"] == 0.0,
             "grippers stay in 0-100 mm")
 
-    leaders = Leaders({s: arm(s) for s in ("left", "right")})
-    c.check(len(leaders.get_action()) == 14, "both leaders read: one fourteen-value action")
-    leaders.arms["left"]._arm.raises = True
-    c.check(leaders.get_action() == {}, "one leader unreadable: no action, never half of one")
+    leaders = Leaders({s: leader(s) for s in ("left", "right")})
+    got = leaders.get_action()
+    c.check(len(got) == 14, "both leaders read: one fourteen-value action")
+    c.check(math.isclose(got["left_joint2.pos"], math.radians(-60)) and math.isclose(got["left_joint3.pos"],
+            math.radians(60.03)), "leader servo degrees map onto follower radians",
+            f'{got["left_joint2.pos"]:.3f} {got["left_joint3.pos"]:.3f}')
+    c.check(math.isclose(got["left_gripper.pos"], GRIPPER_MAX_MM / 2), "half the grip travel is a half-open gripper")
+    leaders.arms["left"]._bus.missing = {3}
+    c.check(leaders.get_action() == {}, "a leader servo that missed its reply: no action, never a stale angle")
+    c.check(math.isclose(to_follower([0.0, 360.0 + 60.0, -90.0, 0.0, 0.0, 0.0, 0.0], 41.2)[1], math.radians(-60))
+            and math.isclose(to_follower([0.0] * 6 + [380.6], 41.2)[6], GRIPPER_MAX_MM / 2),
+            "a servo that counted an extra turn unwraps onto the same angle")
+    c.check(to_follower([999.0, -400.0, 0.0, 0.0, 0.0, 0.0, -5.0], 41.2)[6] == 0.0
+            and all(lo <= v <= hi for v, (lo, hi) in zip(to_follower([170.0, -10.0, 0.0, 0.0, 0.0, 0.0, 0.0], 41.2),
+                                                          LIMITS_RAD)),
+            "leader output stays inside the followers' limits")
 
     os.environ["METAL_PARK_DEG_S"] = "3000"  # fast, so the test takes a second
     p = parking()

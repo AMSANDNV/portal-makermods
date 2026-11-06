@@ -1,8 +1,8 @@
-"""Two Metal followers with three cameras, and two Metal leaders, over Dream Labs' `robots` driver.
+"""Two Metal followers with three cameras, over Dream Labs' `robots` driver.
 
 Each arm reads and takes seven values: joint1..joint6 in radians, then the gripper in mm (0 closed).
-Followers are energized; leaders open read-only and are moved by hand. The arms have no brakes, so
-the only switch-off is `Followers.park()`, which first walks them back to where they were opened.
+The arms have no brakes, so the only switch-off is `Followers.park()`, which first walks them back
+to where they were opened. The Star Arm 102 leaders that drive them are in `utils/star.py`.
 See tutorial/05-robot-loop.md.
 """
 from __future__ import annotations
@@ -52,20 +52,19 @@ def _gripper_deg(side: str, which: str) -> float:
 class Arm:
     """One arm. `read()` returns None on a hiccup instead of raising."""
 
-    def __init__(self, side: str, can_channel: str, leader: bool) -> None:
-        self.side, self.can_channel, self.leader = side, can_channel, leader
+    def __init__(self, side: str, can_channel: str) -> None:
+        self.side, self.can_channel = side, can_channel
         self.errors = 0
         self.energized = False
         self.rest: list[float] | None = None  # the joints when opened: where park() returns
         self._arm = None  # robots.followers.FollowerArm
 
-    def connect(self, energize: bool | None = None) -> None:
-        """Open the arm: energized for a follower, read-only for a leader, unless `energize` says otherwise."""
+    def connect(self, energize: bool = True) -> None:
+        """Open the arm: energized, or read-only with `energize=False`."""
         try:
             from robots import config, metal, motor_arm, robstride
         except ImportError as exc:
             raise RuntimeError("dreamlabs is not installed: run `uv sync`") from exc
-        energize = not self.leader if energize is None else energize
         cfg = config.ArmConfig(
             can_channel=self.can_channel,
             home=(0.0,) * 6,  # never homed: the loop starts from the measured pose
@@ -165,7 +164,7 @@ class StepLimiter:
         return out
 
 
-def _read_pair(arms: dict[str, Arm]) -> dict[str, float]:
+def read_pair(arms: dict) -> dict[str, float]:
     """Both arms as one dict, or {} if either is unreadable: never half a row."""
     values = {}
     for side, arm in arms.items():
@@ -208,7 +207,7 @@ class Followers:
 
     def get_observation(self) -> tuple[dict[str, float], dict]:
         """(state, frames). State is {} while an arm is unreadable; frames keep flowing."""
-        state = _read_pair(self.arms)
+        state = read_pair(self.arms)
         self.limiter.present.update(state)
         frames = {name: frame for name, cam in self.cameras.items() if (frame := cam.read()) is not None}
         return state, frames
@@ -281,28 +280,9 @@ class Followers:
             arm.close()
 
 
-class Leaders:
-    """Both leaders read-only, moved by hand, read as one Portal action."""
-
-    def __init__(self, arms: dict[str, Arm]) -> None:
-        self.arms = arms
-
-    def connect(self) -> None:
-        for arm in self.arms.values():
-            arm.connect()
-
-    def get_action(self) -> dict[str, float]:
-        return _read_pair(self.arms)
-
-    def disconnect(self) -> None:
-        for arm in self.arms.values():
-            arm.close()
-
-
-def _arms(role: str) -> dict[str, Arm]:
-    """One arm per side, on the link `METAL_<ROLE>_<SIDE>_CAN` names; required, so arms never swap silently."""
-    return {side: Arm(side, required_env(f"METAL_{role}_{side.upper()}_CAN"), leader=role == "LEADER")
-            for side in SIDES}
+def _arms() -> dict[str, Arm]:
+    """One follower per side, on the link `METAL_FOLLOWER_<SIDE>_CAN` names; required, so arms never swap silently."""
+    return {side: Arm(side, required_env(f"METAL_FOLLOWER_{side.upper()}_CAN")) for side in SIDES}
 
 
 def build_followers(tracks: list[str], fps: int) -> Followers:
@@ -319,16 +299,12 @@ def build_followers(tracks: list[str], fps: int) -> Followers:
             backend=Cv2Backends.V4L2 if platform.system() == "Linux" else Cv2Backends.ANY,
         )
         cameras[name] = Camera(name, OpenCVCamera(config))
-    return Followers(_arms("FOLLOWER"), cameras, StepLimiter(env_float("METAL_MAX_STEP_RAD", 0.087)))
-
-
-def build_leaders() -> Leaders:
-    return Leaders(_arms("LEADER"))
+    return Followers(_arms(), cameras, StepLimiter(env_float("METAL_MAX_STEP_RAD", 0.087)))
 
 
 def check_arms() -> None:
     """Print the followers' joints twice a second, motors off, until ctrl-c: move an arm to see its link."""
-    arms = _arms("FOLLOWER")
+    arms = _arms()
     for arm in arms.values():
         arm.connect(energize=False)
     try:

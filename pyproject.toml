@@ -11,7 +11,8 @@ dependencies = [
     "python-dotenv>=1",
     "opencv-python>=4.5",
     "pynput>=1.7",
-    "dreamlabs>=1.0.23",        # the `robots` arm driver and `dreamcli`
+    "dreamlabs>=1.0.23",        # the `robots` follower driver and `dreamcli`
+    "motorbridge-smart-servo>=0.0.4,<0.1",  # the Star Arm 102 leaders' FashionStar servos
     "dreamlabs-client>=1.0.14",  # the `dream` client (Dream-1)
 ]
 
