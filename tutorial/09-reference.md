@@ -153,6 +153,20 @@ a joint. Every command is also clamped to the soft limits.
 | `DREAM_CHECKPOINT` | `dreamlabs/dream-1-beta` | a base model or your fine-tune |
 | `DREAM_MAX_JOINT_RAD_S` | `0.5` | cap on commanded joint speed; also the ramp in after a handoff |
 
+`uv run dream-1-tasks` reads the same settings. Its tasks come from `--task`
+(repeated), then `PORTAL_DATA_TASKS`, then `PORTAL_DATA_TASK`.
+
+### Voice agent
+
+| Variable | Default | Notes |
+|---|---|---|
+| `LIVEKIT_INFERENCE_API_KEY`, `LIVEKIT_INFERENCE_API_SECRET` | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | a LiveKit Cloud project's key for Inference, when `LIVEKIT_URL` is self-hosted |
+| `VOICE_STT` | `assemblyai/universal-3-6-pro` | speech-to-text on [LiveKit Inference](https://docs.livekit.io/agents/models/stt/) |
+| `VOICE_LLM` | `google/gemma-4-31b-it` | the [LLM](https://docs.livekit.io/agents/models/llm/) that picks the RPC |
+| `VOICE_TTS`, `VOICE_TTS_VOICE` | `fishaudio/s2.1-pro`, the starter's voice | [text-to-speech](https://docs.livekit.io/agents/models/tts/) model and voice |
+
+The defaults are [agent-starter-python](https://github.com/livekit-examples/agent-starter-python)'s.
+
 ### Training
 
 | Training variable | Default | Purpose |
@@ -196,6 +210,8 @@ CUDA/MPS/CPU automatically, and waits for the `c` handoff before producing actio
 - **Dream-1 refuses or stalls.** `DreamAuthError`: check `DREAM_API_KEY`.
   `pool_warming`: the model is starting. It sends nothing until all three
   cameras publish.
+- **The voice agent cannot reach Dream-1 or its models.** See
+  [chapter 10](10-voice-tasks.md#troubleshooting).
 - **ACT sees no observations.** Every camera the checkpoint uses must publish.
 - **Low frame rate.** Compare device and tick times in the robot's 5 s line, and
   lower the rate or camera resolution if the hardware cannot keep up.
@@ -205,4 +221,4 @@ CUDA/MPS/CPU automatically, and waits for the `c` handoff before producing actio
 
 ---
 
-Previous: [8. Handoff](08-handoff.md) · [Tutorial index](../README.md#the-tutorial)
+Previous: [8. Handoff](08-handoff.md) · [Tutorial index](../README.md#the-tutorial) · Next: [10. Steer Dream-1 by voice](10-voice-tasks.md)

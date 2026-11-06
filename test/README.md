@@ -6,7 +6,7 @@ Run from the repo root. ACT checks need the training dependency group:
 uv run --group train python -m unittest test.test_act
 uv run python -m test.test_teleop
 uv run python -m test.test_resilience
-uv run python -m unittest test.test_dream1
+uv run python -m unittest test.test_dream1 test.test_dream1_tasks
 ```
 
 For transport and archive checks, start `livekit-server --dev` in another
@@ -17,6 +17,7 @@ uv run python -m test.test_pubsub
 uv run python -m test.test_recorder
 uv run python -m test.test_handoff
 uv run python -m test.test_degraded
+uv run --group voice python -m test.test_voice_tasks
 ```
 
 | Suite | Checks |
@@ -25,10 +26,12 @@ uv run python -m test.test_degraded
 | `test_teleop` | Control cycling, frame anchors, task selection, keyboard input, preview |
 | `test_resilience` | Per-arm CAN failure recovery, both-arms-or-nothing state, target-step and soft limits |
 | `test_dream1` | Dream-1 embodiment, camera roles, frame encoding, unit mapping, chunk layout |
+| `test_dream1_tasks` | A task change pauses first and never starts motion; pause, resume, teleop handoff; task sources |
 | `test_pubsub` | Discovery, control gate, observation transport |
 | `test_recorder` | Episode markers and frame/state/action alignment after an archive round trip |
 | `test_handoff` | Human → policy → human actions recorded in one episode |
 | `test_degraded` | Alignment under jitter, drops, and stalls |
+| `test_voice_tasks` | The voice agent's RPCs to a real operator: task, pause, resume, teleop handoff, stop words |
 
 Synthetic peers encode tick indices in joint state, a white bar in video, and
 returned actions. The archive reader checks they agree using exact timestamp

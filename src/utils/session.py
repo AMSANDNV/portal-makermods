@@ -17,10 +17,8 @@ _TASKS_SEPARATOR = ";"  # task descriptions are sentences, which contain commas
 
 def prompt_tasks() -> list[str]:
     """The task list for this session, in hotkey order. Never empty."""
-    if preset := env_str("PORTAL_DATA_TASKS", ""):
-        tasks = [task.strip() for task in preset.split(_TASKS_SEPARATOR) if task.strip()]
-        if tasks:
-            return tasks[:MAX_TASKS]
+    if preset := preset_tasks():
+        return preset
 
     default = env_str("PORTAL_DATA_TASK", DEFAULT_TASK)
     if not sys.stdin.isatty():
@@ -36,6 +34,12 @@ def prompt_tasks() -> list[str]:
         # No default past the first: a blank would duplicate task 1's label.
         tasks.append(_ask_required(f"task {number}", fallback=f"{default} {number}"))
     return tasks
+
+
+def preset_tasks() -> list[str]:
+    """`PORTAL_DATA_TASKS` split into tasks, at most nine; empty when it is unset."""
+    tasks = [task.strip() for task in env_str("PORTAL_DATA_TASKS", "").split(_TASKS_SEPARATOR) if task.strip()]
+    return tasks[:MAX_TASKS]
 
 
 def _ask_count() -> int:

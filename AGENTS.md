@@ -12,6 +12,10 @@ Keep it small and readable. The README leads with the numbered `tutorial/`.
   followers energized, leaders read-only; `src/utils/` also holds preview, hotkey, and task-prompt details.
 - `src/policies/act/` contains training (`train.py`), the operator (`run.py`, `uv run act`), and a SkyPilot example.
 - `src/policies/dream_1/` runs Dream Labs' Dream-1 (`run.py`, `uv run dream-1`) with the dream client's `metal` IK.
+- `src/policies/dream_1_tasks/` is that loop with a switchable task (`uv run dream-1-tasks`); it answers the `dream.*`
+  RPCs named in `src/utils/common.py`: set the task, pause, resume, hand control to the teleoperator.
+- `src/voice_agent.py` (`uv run --group voice voice-agent`) is a LiveKit Agents voice agent on agent-starter-python's
+  pipeline that calls those RPCs. It is not a Portal peer and never sends actions.
 - `test/` checks behavior without hardware.
 
 Run the three peers as `uv run robot`, `uv run teleoperator`, and `uv run recorder`
@@ -24,6 +28,7 @@ Update affected chapters with behavior changes.
 - All peers load `portal.yaml`; do not duplicate schema field lists in Python.
 - Model tensors use training dataset order, read from `meta/info.json`.
 - Control is explicit: `c` selects an operator, `p` parks or powers up the arms. No background auto-claim loop.
+  A task change releases Dream-1's control first; only an explicit resume (`c`, or "continue") gives it back.
 - Keep recording separate from the control loops. Preserve action anchors and
   both archive timelines; let Portal stamp synchronized action send times.
 - Run blocking hardware or inference off the event loop. Device calls must be
@@ -42,8 +47,9 @@ Update affected chapters with behavior changes.
 uv run --group train python -m unittest test.test_act
 uv run python -m test.test_teleop
 uv run python -m test.test_resilience
-uv run python -m unittest test.test_dream1
+uv run python -m unittest test.test_dream1 test.test_dream1_tasks
 # With livekit-server --dev:
+uv run --group voice python -m test.test_voice_tasks
 uv run python -m test.test_pubsub
 uv run python -m test.test_recorder
 uv run python -m test.test_handoff

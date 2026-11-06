@@ -15,13 +15,16 @@ dependencies = [
     "dreamlabs-client>=1.0.14",  # the `dream` client (Dream-1)
 ]
 
-# `uv run robot`, `uv run teleoperator`, `uv run recorder`, `uv run dream-1`, `uv run act`
+# `uv run robot`, `uv run teleoperator`, `uv run recorder`, `uv run dream-1`, `uv run dream-1-tasks`, `uv run act`,
+# and `uv run --group voice voice-agent`
 [project.scripts]
 robot = "robot:run"
 teleoperator = "teleoperator:run"
 recorder = "recorder:run"
 dream-1 = "policies.dream_1.run:run"
+dream-1-tasks = "policies.dream_1_tasks.run:run"
 act = "policies.act.run:run"
+voice-agent = "voice_agent:run"
 
 [build-system]
 requires = ["setuptools>=69"]
@@ -29,9 +32,11 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-py-modules = ["robot", "teleoperator", "recorder"]
-packages = ["utils", "policies", "policies.act", "policies.dream_1"]
+py-modules = ["robot", "teleoperator", "recorder", "voice_agent"]
+packages = ["utils", "policies", "policies.act", "policies.dream_1", "policies.dream_1_tasks"]
 
 [dependency-groups]
 # Training alone needs no robot, LiveKit connection, or desktop input.
 train = ["lerobot[training]>=0.6.1"]
+# The voice agent (`uv run --group voice voice-agent`): LiveKit Agents and its ai-coustics noise cancellation.
+voice = ["livekit-agents~=1.8", "livekit-plugins-ai-coustics~=0.3"]

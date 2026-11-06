@@ -24,6 +24,10 @@ no operator → teleoperator → policy-act → teleoperator → ...
 The call is an RPC to the robot. If it fails, teleop reports the error; press
 `c` again to retry. Neither operator claims control automatically.
 
+`uv run dream-1-tasks` ([chapter 10](10-voice-tasks.md)) makes the same call when
+asked: its `dream.pause`, `dream.resume`, and `dream.to_teleop` RPCs, which the
+voice agent calls, release control, take it, or pass it to `teleoperator`.
+
 ## 2. Keep recording across handoffs
 
 The [ACT walkthrough](03-train-act.md#4-record-corrections) gives the keypresses

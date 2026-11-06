@@ -86,7 +86,9 @@ The dataset is saved to `data/local/portal-makermods`. Discarded and unfinished
 takes are excluded. Conversion does not append to an existing dataset; use a
 new repo ID for later rounds, as shown in chapter 3.
 
-Continue to **[3. Train ACT](03-train-act.md)**.
+Continue to **[3. Train ACT](03-train-act.md)**. To change Dream-1's task while
+it runs, or to pause it and hand over control by voice, see
+[chapter 10](10-voice-tasks.md).
 
 For implementation details, see [`src/policies/dream_1/run.py`](../src/policies/dream_1/run.py).
 
