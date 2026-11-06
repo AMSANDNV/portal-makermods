@@ -8,7 +8,7 @@ Every action names the frame it answers in `in_reply_to_ts_us`: the operator
 flies on video, which is usually a tick or two behind the state.
 See tutorial/06-operator-loop.md.
 
-Hotkeys: `c` cycle control, `p` park the arms (the robot exits), `r` toggle recording, `[` discard the take, `x` quit,
+Hotkeys: `c` cycle control, `p` park the arms (again: power them up), `r` toggle recording, `[` discard the take, `x` quit,
 `1`-`9` switch task.
 """
 from __future__ import annotations

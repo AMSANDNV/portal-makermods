@@ -4,7 +4,7 @@ Each arm is one follower on its own CAN link: seven values, joint1..joint6 in ra
 gripper (0 closed, GRIPPER_MAX_MM open). Followers are energized (position control with gravity
 feed-forward); leaders open read-only, moved by hand. The arms are brakeless and drop when
 unpowered: only `Followers.park()`, asked for explicitly, switches them off, and only after walking
-them back to the pose each was opened in. See tutorial/05-robot-loop.md.
+them back to the pose each was opened in; `unpark()` powers them up again. See tutorial/05-robot-loop.md.
 """
 from __future__ import annotations
 
@@ -70,7 +70,8 @@ class Arm:
         self.rest: list[float] | None = None  # the joints as opened: where park() returns the arm
         self._arm = None  # robots.followers.FollowerArm
 
-    def connect(self) -> None:
+    def connect(self, energize: bool | None = None) -> None:
+        """Open the arm: a follower energized, a leader read-only, unless `energize` says otherwise."""
         try:
             from robots import config, metal, motor_arm, robstride
         except ImportError as exc:
@@ -83,7 +84,7 @@ class Arm:
             gripper_hold_torque_nm=env_float("METAL_GRIPPER_HOLD_NM", 0.5),
         )
         self._arm = motor_arm.open_arm(
-            metal.ARM, cfg, self.side, opener=robstride.open_can_bus, energize=not self.leader
+            metal.ARM, cfg, self.side, opener=robstride.open_can_bus, energize=not self.leader if energize is None else energize
         )
         if (reading := self.read()) is None:
             raise RuntimeError(f"{self.side} arm: no pose after opening on {self.can_channel}")
@@ -185,6 +186,7 @@ class Followers:
 
     def __init__(self, arms: dict[str, Arm], cameras: dict[str, Camera], limiter: StepLimiter) -> None:
         self.arms, self.cameras, self.limiter = arms, cameras, limiter
+        self.parked = False  # switched off at rest, open read-only: state flows, actions are ignored
 
     def connect(self) -> None:
         for camera in self.cameras.values():
@@ -200,6 +202,8 @@ class Followers:
         return state, frames
 
     def send_action(self, action: dict[str, float]) -> None:
+        if self.parked:
+            return
         target = clamp_to_limits(self.limiter.step(action))
         for side, arm in self.arms.items():
             fields = arm_fields(side)
@@ -207,7 +211,7 @@ class Followers:
                 arm.command([target[name] for name in fields])
 
     def park(self, fps: int) -> None:
-        """Walk both arms back to the pose they were opened in, slowly, then switch them off.
+        """Walk both arms back to the pose they were opened in, slowly, switch them off, and reopen them read-only.
 
         Blocking; run it on the hardware thread with no actions applied. Raises with the arms holding
         where they are if an arm is unreadable, falls behind its target (blocked), or does not arrive.
@@ -241,6 +245,18 @@ class Followers:
                 raise RuntimeError(f"{side} arm did not reach its rest pose; holding where it is")
         for arm in self.arms.values():
             arm.switch_off()
+        self.parked = True
+        for arm in self.arms.values():
+            arm.connect(energize=False)  # read-only, motors stay off: state keeps flowing
+
+    def unpark(self) -> None:
+        """Power the parked arms up again, holding where they rest (which becomes the new park pose)."""
+        for arm in self.arms.values():
+            arm.close()
+        for arm in self.arms.values():
+            arm.connect(energize=True)
+        self.limiter.present.clear()  # never command before a fresh read
+        self.parked = False
 
     def disconnect(self) -> None:
         for camera in self.cameras.values():

@@ -65,10 +65,9 @@ before taking over.
 
 ## 4. Convert and inspect
 
-Finish the take and select the human. Press `p` in teleop or the Dream-1 terminal
-to park: the followers walk back to the pose they started in, switch off, and the
-robot exits. Stop Dream-1 with Ctrl-C, quit teleop with `x`, then stop the
-recorder with Ctrl-C.
+Finish the take and select the human. Stop Dream-1 with Ctrl-C, quit teleop with
+`x`, stop the recorder with Ctrl-C, then stop the robot with Ctrl-C: it parks the followers first (they walk back to
+the pose they started in and switch off), then exits.
 
 The recorder saves `.rrd` archives under `data/sessions`. Keep them so you can
 rebuild the dataset later. On the robot host, check the conversion report:

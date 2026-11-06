@@ -182,11 +182,10 @@ In the teleop terminal:
 Leave all three processes running and continue to
 **[2. Run Dream-1 and record corrections](02-dream-1.md)**.
 
-If you need to stop here, press `p` in teleop to park: the followers walk back to the pose they
-started in, switch off, and the robot exits. Then press `x` in teleop and stop the
-recorder with Ctrl-C. Wait for the recorder to exit. Ctrl-C on the robot instead
-leaves the arms holding under power, and the next start then refuses until you
-support them and cycle their power.
+If you need to stop here, press `x` in teleop, stop the recorder with Ctrl-C
+and wait for it to exit, then stop the robot with Ctrl-C: it parks the followers first (they walk back to
+the pose they started in and switch off), then exits. To pause without stopping, press `p` in
+teleop: the followers park and the robot keeps streaming; `p` again powers them up.
 
 To record without a policy, follow the
 [human-only alternative](09-reference.md#human-only-demonstrations).

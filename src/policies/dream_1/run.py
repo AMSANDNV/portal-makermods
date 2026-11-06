@@ -8,7 +8,7 @@ arm (`"ik": {"arm": "metal"}`). See tutorial/02-dream-1.md.
     uv run dream-1 --task "fold the towel" --dry-run
 
 Press c in this terminal (or in teleop) to give Dream-1 control; c here again releases it.
-Press p to park the arms: the robot walks them to rest, switches them off, and exits.
+Press p to park the arms (the robot walks them to rest and switches them off); p again powers them up.
 """
 from __future__ import annotations
 

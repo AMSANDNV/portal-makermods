@@ -23,13 +23,14 @@ Update affected chapters with behavior changes.
 
 - All peers load `portal.yaml`; do not duplicate schema field lists in Python.
 - Model tensors use training dataset order, read from `meta/info.json`.
-- Control is explicit: `c` selects an operator, `p` asks the robot to park. No background auto-claim loop.
+- Control is explicit: `c` selects an operator, `p` parks or powers up the arms. No background auto-claim loop.
 - Keep recording separate from the control loops. Preserve action anchors and
   both archive timelines; let Portal stamp synchronized action send times.
 - Run blocking hardware or inference off the event loop. Device calls must be
   serialized and finished before disconnecting hardware.
-- Never disable the Metal motors on stop or fault: the arms are brakeless and drop. The one
-  switch-off is an explicit park (`p`): walk to the pose captured at startup, verify, then disable.
+- Never disable the Metal motors on a fault: the arms are brakeless and drop. They switch off only
+  through a park (`p`, or the robot's Ctrl-C): walk to the pose captured at startup, verify, then
+  disable. A park that cannot finish leaves them holding.
 - Preserve the soft-limit clamp, the target-step limiter, and both-arms-or-nothing reads. A small clamp on
   tracking error limits torque under MIT control and can immobilize joints.
 - Check installed library APIs when restoring older examples.

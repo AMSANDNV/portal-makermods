@@ -76,9 +76,9 @@ In the teleop terminal:
 6. Press `r` to finish a successful take. Use `[` before ending a take to discard it.
 7. Repeat steps 2–6 to collect more corrections.
 
-After the final take, select the human. Stop ACT with Ctrl-C, press `p` in teleop to park: the followers walk back to the pose they
-started in, switch off, and the robot exits.
-Quit teleop with `x`, then stop the recorder with Ctrl-C.
+After the final take, select the human. Stop ACT with Ctrl-C, quit teleop with
+`x`, stop the recorder with Ctrl-C, then stop the robot with Ctrl-C: it parks the followers first (they walk back to
+the pose they started in and switch off), then exits.
 Wait for the recorder to exit before conversion.
 
 ## 5. Convert and retrain

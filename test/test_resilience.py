@@ -65,6 +65,8 @@ def parking(blocked=False):
         arms[side] = Arm(side, "can0", leader=False)
         arms[side]._arm = TrackingArm([0.5, -1.0, 1.0, 0.2, 0.0, 0.0, 30.0], blocked and side == "left")
         arms[side].rest = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        arms[side].opened = []  # each reopen's energize flag, instead of a real driver
+        arms[side].connect = lambda energize=None, opened=arms[side].opened: opened.append(energize)
     return Followers(arms, {}, StepLimiter(0.1))
 
 
@@ -143,6 +145,15 @@ def main() -> int:
     poses = [a._arm.pose[:6] for a in p.arms.values()]
     c.check(all(max(map(abs, pose)) < 1e-6 for pose in poses), "park walks both arms to their rest pose")
     c.check(all(a._arm.off for a in p.arms.values()), "park switches the arms off once they are at rest")
+    c.check(p.parked and all(a.opened == [False] for a in p.arms.values()),
+            "a parked robot reopens the arms read-only: state keeps flowing, motors stay off")
+    before = len(p.arms["left"]._arm.commands)
+    p.limiter.present.update(action([0.0] * 7, [0.0] * 7))
+    p.send_action(action([0.3] * 7, [0.3] * 7))
+    c.check(len(p.arms["left"]._arm.commands) == before, "actions are ignored while parked")
+    p.unpark()
+    c.check(not p.parked and all(a.opened == [False, True] for a in p.arms.values()),
+            "unpark reopens the arms energized")
     steps = [abs(b[1] - a[1]) for a, b in zip(p.arms["right"]._arm.commands, p.arms["right"]._arm.commands[1:])]
     c.check(max(steps) <= math.radians(30) + 1e-9, "park never jumps more than one step per tick", f"{max(steps):.3f}")
 

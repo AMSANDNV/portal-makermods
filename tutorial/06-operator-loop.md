@@ -54,7 +54,7 @@ teleop prompts for task descriptions at startup. The hotkeys are:
 | Key | Action |
 |---|---|
 | `c` | Claim or cycle control |
-| `p` | Park: the robot walks the followers to rest, switches them off, and exits |
+| `p` | Park the followers (walk to rest, switch off); again to power them up |
 | `r` | Start or end a take |
 | `[` | Discard the current take |
 | `1`–`9` | Switch tasks between takes |

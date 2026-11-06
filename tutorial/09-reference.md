@@ -13,8 +13,8 @@ then use the running teleoperator and recorder:
 3. Demonstrate the task with the leaders.
 4. Press `r` to finish. For a failed attempt, press `[` while the take is open instead.
 5. Repeat steps 2–4 to collect varied successful demonstrations.
-6. Press `p` in teleop to park the followers (the robot exits), press `x`, and
-   stop the recorder with Ctrl-C. Wait for the recorder to exit.
+6. Press `x` in teleop, stop the recorder with Ctrl-C and wait for it to exit,
+   then stop the robot with Ctrl-C; it parks the followers first.
 7. Follow [chapter 2's conversion steps](02-dream-1.md#4-convert-and-inspect),
    then continue to [ACT training](03-train-act.md).
 
@@ -192,9 +192,9 @@ CUDA/MPS/CPU automatically, and waits for the `c` handoff before producing actio
   Accessibility permission for the terminal on macOS. Relaunch after granting it.
 - **No observations in ACT:** every declared camera must publish; the checkpoint
   must use cameras available in `portal.yaml`.
-- **`still powered from an earlier session`:** the robot was stopped with
-  Ctrl-C or crashed, so the joints still hold. Support the arms and cycle their
-  power, then start the robot. End sessions with `p` to avoid this.
+- **`still powered from an earlier session`:** the last robot crashed or could
+  not finish its park, so the joints still hold. Support the arms and cycle
+  their power, then start the robot.
 - **Arm errors:** the robot's 5 s line names the arm. Check its configured adapter
   path, serial permissions, and power, then restart the robot. For SocketCAN,
   also check the link with `ip link`. `dreamlabs is not

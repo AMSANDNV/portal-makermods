@@ -5,9 +5,10 @@ publishes them on one shared timestamp so the operator's synchronizer can match
 them into a single observation, and applies whatever action last cleared the
 active-operator gate.
 
-Ctrl-C stops and leaves the arms holding under power. `p` here, or in teleop or a policy,
-parks instead: the arms walk back to the pose they were in when this started, switch off,
-and the process exits, so the next start needs no power cycle.
+`p` here, or in teleop or a policy, parks the arms: they walk back to the pose they were in
+when this started and switch off, while state and video keep flowing and actions are ignored.
+`p` again powers them up where they rest. Ctrl-C parks too, then exits, so the next start
+finds the arms switched off at rest. A fault never switches them off.
 
 `uv run robot --check-arms` opens the followers read-only and prints their joints: move one
 to see which link it is on.
@@ -52,7 +53,7 @@ async def main() -> None:
     hardware = HardwareThread("followers")
 
     latest_action: dict[str, float] = {}
-    park_asked_by: str | None = None
+    toggle_asked_by: str | None = None  # a park request: parks, or powers up a parked robot
 
     def on_action(action: Action) -> None:
         nonlocal latest_action
@@ -73,9 +74,9 @@ async def main() -> None:
             asyncio.create_task(robot.set_active_operator(None))
 
     def on_park(data) -> str:
-        nonlocal park_asked_by
-        park_asked_by = data.caller_identity
-        return "parking: the arms walk to rest, switch off, and the robot exits"
+        nonlocal toggle_asked_by
+        toggle_asked_by = data.caller_identity
+        return "powering the arms up" if followers.parked else "parking: the arms walk to rest and switch off"
 
     robot.register_rpc_method(PARK_RPC, on_park)
     robot.on_action(on_action)
@@ -86,7 +87,7 @@ async def main() -> None:
     print(f"[robot] connecting to {url} as '{ROBOT_IDENTITY}' in room '{room}' ...")
     await robot.connect(url, mint_token(ROBOT_IDENTITY, room))
     print(f"[robot] connected; cameras={list(tracks)}; streaming at {fps} fps; "
-          "p to park and exit, ctrl-c to stop holding")
+          "p to park or power up, ctrl-c to park and stop")
 
     budget = TickBudget(fps)
     hotkeys = Hotkeys(global_tap=False)  # this terminal only; works over SSH
@@ -95,18 +96,24 @@ async def main() -> None:
     try:
         async for tick in pace(fps):
             if "p" in hotkeys.drain():
-                park_asked_by = "this terminal"
-            if park_asked_by:
-                print(f"[robot] park asked by {park_asked_by}; releasing control and walking the arms to rest ...")
-                park_asked_by, latest_action = None, {}
+                toggle_asked_by = "this terminal"
+            if toggle_asked_by and followers.parked:
+                print(f"[robot] power-up asked by {toggle_asked_by}")
+                toggle_asked_by, latest_action = None, {}
+                try:
+                    await hardware.run(followers.unpark)
+                    print("[robot] arms powered up, holding where they rest")
+                except Exception as exc:
+                    print(f"[robot] power-up failed: {exc}; press p to try again")
+            elif toggle_asked_by:
+                print(f"[robot] park asked by {toggle_asked_by}; releasing control and walking the arms to rest ...")
+                toggle_asked_by, latest_action = None, {}
                 await robot.set_active_operator(None)
                 try:
                     await hardware.run(followers.park, fps)
+                    print("[robot] parked: arms switched off, still streaming; p powers them up, ctrl-c stops")
                 except Exception as exc:
                     print(f"[robot] park stopped: {exc}. The arms hold; press p to try again")
-                    continue
-                print("[robot] parked and switched off; exiting")
-                break
 
             # One stamp for state and frames, so they match into one observation. Portal's
             # clock never goes backwards, which its lossy ordering guard relies on: a
@@ -133,6 +140,15 @@ async def main() -> None:
                     print(f"[robot] {line}")
     except (KeyboardInterrupt, asyncio.CancelledError):  # ctrl-c arrives as CancelledError
         print("\n[robot] stopping ...")
+        if not followers.parked:
+            print("[robot] parking first, so the next start finds the arms at rest ...")
+            try:
+                await robot.set_active_operator(None)
+                await hardware.run(followers.park, fps)
+                print("[robot] parked: arms switched off")
+            except BaseException as exc:  # a second ctrl-c lands here too; hardware.close() lets a park finish
+                print(f"[robot] park did not finish ({exc!r}); the arms hold under power: support them and "
+                      "cycle their power before the next start")
     finally:
         hotkeys.stop()
         print("[robot] disconnecting ...")

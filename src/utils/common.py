@@ -25,11 +25,11 @@ CONFIG_PATH = ROOT / "portal.yaml"
 ROBOT_IDENTITY = "robot"
 TELEOPERATOR_IDENTITY = "teleoperator"
 RECORDER_IDENTITY = "recorder"
-PARK_RPC = "park"  # any operator's `p`: the robot walks the arms to rest, switches them off, and exits
+PARK_RPC = "park"  # any operator's `p`: the robot parks the arms (switched off at rest), or powers them up
 
 
 async def request_park(op, who: str) -> None:
-    """Ask the robot to park; it answers at once and parks on its own loop."""
+    """Ask the robot to park, or to power up a parked robot; it answers at once and acts on its own loop."""
     try:
         print(f"[{who}] robot: {await op.perform_rpc(PARK_RPC, destination=ROBOT_IDENTITY)}")
     except Exception as exc:

@@ -41,9 +41,9 @@ Read these after completing the walkthrough, or when you need to change the code
 | [08. Handoff](tutorial/08-handoff.md) | Switch between human and policy |
 | [09. Reference](tutorial/09-reference.md) | Settings, alternatives, and troubleshooting |
 
-**Metal arms have no brakes.** Start the robot with the followers resting, and end
-with `p` (park): they walk back to that pose, switch off, and the robot exits.
-Ctrl-C and faults never disable the motors; the arms keep holding under power.
+**Metal arms have no brakes.** Start the robot with the followers resting: that is
+where they park. `p` parks them (walk back, switch off) and powers them up again;
+Ctrl-C on the robot parks before it exits. A fault never disables the motors.
 
 The runnable peers are in `src/`; policies are in `src/policies/`.
 All peers share [`portal.yaml`](portal.yaml).
