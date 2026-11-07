@@ -105,6 +105,27 @@ class MakerSetupTests(unittest.TestCase):
         for arm in arms.values():
             arm.connect.assert_called_once_with(True)
 
+    def test_maker_sdk_driver_integration(self):
+        from utils import maker_sdk
+
+        fake_sdk_arm = Mock()
+        fake_sdk_arm.state.name = "ENABLED"
+        fake_sdk_arm.get_joint_positions.return_value = [0.1, -0.2, 0.3, 0.0, 0.0, 0.0, math.radians(-49.25)]
+        fake_sdk_arm.set_joint_targets.return_value = True
+        with patch.dict(os.environ, {
+            "MAKER_DRIVER": "sdk",
+            "METAL_GRIPPER_OPEN_DEG": "-96.0",
+            "METAL_GRIPPER_CLOSED_DEG": "-2.5",
+        }), patch.object(maker_sdk, "SdkArm", return_value=fake_sdk_arm), \
+                patch.object(maker_sdk, "create_backend", return_value=Mock()):
+            arm = metal.Arm("left", "/dev/ttyACM0", False)
+            arm.connect(energize=True)
+            reading = arm.read()
+            self.assertAlmostEqual(reading[-1], 40.0, places=2)
+            arm.command([0.0] * 6 + [40.0])
+            fake_sdk_arm.enable.assert_called_once()
+            fake_sdk_arm.set_joint_targets.assert_called_once()
+
 
 class UsbTests(unittest.TestCase):
     def test_exact_serial_selection_never_defaults_to_first(self):

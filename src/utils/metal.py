@@ -99,11 +99,27 @@ class Arm:
 
     def connect(self, energize: bool | None = None) -> None:
         """Open the arm: energized for a follower, read-only for a leader, unless `energize` says otherwise."""
+        energize = not self.leader if energize is None else energize
+        if arm_model() == "makers" and env_str("MAKER_DRIVER", "robots") == "sdk":
+            from utils.maker_sdk import MakerSdkFollowerArm
+
+            self._arm = MakerSdkFollowerArm(
+                self.side,
+                self.can_channel,
+                gripper_open_deg=_gripper_deg(self.side, "OPEN"),
+                gripper_closed_deg=_gripper_deg(self.side, "CLOSED"),
+                gripper_hold_torque_nm=env_float("METAL_GRIPPER_HOLD_NM", 0.5),
+                energize=energize,
+            )
+            self.energized = energize
+            if (reading := self.read()) is None:
+                raise RuntimeError(f"{self.side} arm: no pose after opening {self.can_channel}")
+            self.rest = reading[:6]
+            return
         try:
             from robots import config, motor_arm
         except ImportError as exc:
             raise RuntimeError("dreamlabs is not installed: run `uv sync`") from exc
-        energize = not self.leader if energize is None else energize
         cfg = config.ArmConfig(
             can_channel=self.can_channel,
             home=(0.0,) * 6,  # never homed: the loop starts from the measured pose

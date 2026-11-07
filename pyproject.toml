@@ -14,10 +14,13 @@ dependencies = [
     "dreamlabs>=1.0.23",        # the `robots` arm driver and `dreamcli`
     "dreamlabs-client>=1.0.14",  # the `dream` client (Dream-1)
     "python-can[gs-usb]>=4.5",   # native candleLight USB-CAN, including macOS
+    "motorbridge-smart-servo",   # Star 102 leader servo stack for maker-arm-sdk
+    "pyserial",
+    "pyyaml",
 ]
 
 # `uv run robot`, `uv run teleoperator`, `uv run recorder`, `uv run dream-1`, `uv run dream-1-tasks`, `uv run act`,
-# `uv run --group voice voice-agent`, and `uv run --group monitor task-monitor`
+# `uv run --group voice voice-agent`, `uv run --group monitor task-monitor`, and `uv run maker-arm`
 [project.scripts]
 robot = "robot:run"
 teleoperator = "teleoperator:run"
@@ -28,6 +31,7 @@ act = "policies.act.run:run"
 voice-agent = "voice_agent:run"
 hand-teleop = "hand_teleop:run"
 task-monitor = "task_monitor:run"
+maker-arm = "maker_arm.cli.main:main"
 
 [build-system]
 requires = ["setuptools>=69"]
@@ -44,7 +48,20 @@ override-dependencies = [
 [tool.setuptools]
 package-dir = { "" = "src" }
 py-modules = ["robot", "teleoperator", "recorder", "voice_agent", "hand_teleop", "task_monitor"]
-packages = ["utils", "policies", "policies.act", "policies.dream_1", "policies.dream_1_tasks"]
+packages = [
+    "utils",
+    "policies",
+    "policies.act",
+    "policies.dream_1",
+    "policies.dream_1_tasks",
+    "maker_arm",
+    "maker_arm.cli",
+    "maker_arm.profiles",
+    "maker_arm.transport",
+]
+
+[tool.setuptools.package-data]
+"maker_arm.profiles" = ["*.yaml", "*.json"]
 
 [dependency-groups]
 # Training alone needs no robot, LiveKit connection, or desktop input.
