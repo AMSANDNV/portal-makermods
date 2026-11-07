@@ -1,24 +1,23 @@
-"""Visual strategic planner: the first frame of the scene -> an ordered Dream-1 task list.
+"""Astra director: "make a quesadilla" -> plan + contact markers -> drive Dream-1 -> verify -> next.
 
-Sends the overhead camera's first frame to an OpenAI-compatible vision model (the NVIDIA NIM
-inference hub) and asks for a short, ordered list of imperative tasks that accomplish a goal
-(default: make a quesadilla). `uv run dream-1-tasks` then executes them one at a time.
+Astra (NVIDIA NIM, gpt-6-astra via the Responses API) is the visual strategic planner. Given the
+overhead camera's first frame and a goal, it returns an ordered list of steps, each with a contact
+point (a pixel on the object where Dream-1 should make contact). The director then, for each step:
+overlays the contact marker on the overhead view Dream-1 reads, tells dream-1-tasks the step and
+resumes Dream-1, and polls Astra on fresh frames until it judges the step done, then advances.
 
-    uv run scene-planner --from-room                      # grab the frame from the running robot's overhead camera
-    uv run scene-planner --image scene.jpg                # or plan from a saved image
-    uv run scene-planner --camera /dev/v4l/by-path/...    # or grab straight from a camera (robot NOT running)
-    uv run scene-planner --from-room --drive              # also walk Dream-1 through the plan, one Enter per step
+    uv run scene-planner --plan-only                       # just print/save the plan (no robot needed if --image)
+    uv run scene-planner --image scene.jpg --plan-only     # plan from a saved image
+    uv run scene-planner --goal "make a quesadilla"        # full director: plan + drive Dream-1 + verify + next
 
-The plan is printed, written to plan.json, and shown as a ready-to-run `dream-1-tasks` command
-(it takes up to nine --task presets). Config comes from the environment / .env.local:
+Start `uv run robot` and `uv run dream-1-tasks` first (the director drives Dream-1 over Portal; it
+never drives the arms itself). A hand on the park key. By default each step waits for Enter before
+Dream-1 moves; --auto runs them back to back.
 
-    NIM_BASE_URL       OpenAI-compatible base URL, e.g. https://integrate.api.nvidia.com/v1
+Config (env / .env.local):
+    NIM_BASE_URL       OpenAI-compatible base, e.g. https://inference-api.nvidia.com/v1
     NIM_API_KEY        the gateway API key
-    NIM_PLANNER_MODEL  the vision model id, e.g. nvidia/nemotron-3.5-super-vl-120b-a12b
-
---drive sends each task to dream-1-tasks (dream.set_task) then resumes it (dream.resume), waiting
-for you to press Enter before each step; it never drives the arms itself. Start the robot and
-`uv run dream-1-tasks` first, with a hand on the park key.
+    NIM_PLANNER_MODEL  the model id, e.g. azure/openai/gpt-6-astra
 """
 from __future__ import annotations
 
@@ -28,23 +27,24 @@ import base64
 import json
 import re
 import sys
+import time
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils.common import (CONFIG_PATH, DREAM_RESUME_RPC, DREAM_SET_TASK_RPC, DREAM_STATUS_RPC,
+from utils.common import (CONFIG_PATH, DREAM_PAUSE_RPC, DREAM_RESUME_RPC, DREAM_SET_MARKERS_RPC, DREAM_SET_TASK_RPC,
                           DREAM_TASKS_IDENTITY, env_str, load_env, mint_token, required_env)
 
-# Where the overhead view sits in portal.yaml; the model learns the scene from it.
 OVERHEAD_TRACK = "overhead_camera"
-MAX_TASKS = 9           # dream-1-tasks takes 1..9 presets
-MAX_TASK_CHARS = 200    # one instruction; longer is likely a model mistake
+MAX_TASKS = 9
+MAX_TASK_CHARS = 200
 PLAN_PATH = Path(__file__).resolve().parents[1] / "plan.json"
+ANNOTATED_PATH = Path(__file__).resolve().parents[1] / "plan_annotated.jpg"
 
-DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+DEFAULT_BASE_URL = "https://inference-api.nvidia.com/v1"
+DEFAULT_MODEL = "azure/openai/gpt-6-astra"
 DEFAULT_GOAL = "make a cheese quesadilla on the griddle"
 
 SYSTEM_PROMPT = """\
@@ -53,19 +53,124 @@ You see one photo of the workspace (an overhead camera) and a goal. Produce the 
 short manipulation steps the robot must perform to reach the goal, grounded ONLY in what the photo
 shows (ingredients, tools, their positions).
 
+For each step also give the contact point: the pixel [x, y] in THIS image where the gripper should
+make contact (e.g. the spot on the tortilla to grasp or press). Use image pixel coordinates with
+[0, 0] at the top-left; x right, y down.
+
 Rules for each step:
 - One atomic manipulation per step, phrased as a short imperative instruction Dream-1 can follow,
   e.g. "pick up the tortilla and lay it flat on the griddle".
 - Name the specific object you see ("the yellow cheese", "the red bowl"), never vague references.
 - Order them so the task actually succeeds (e.g. tortilla before cheese before folding before plating).
-- At most nine steps. Keep each under 200 characters.
-- Do not include setup, safety, commentary, or numbering inside the strings.
+- At most nine steps. Keep each instruction under 200 characters.
 
 Respond with ONLY a JSON object of this exact shape and nothing else:
-{"reasoning": "<one short sentence on what you see and the strategy>", "tasks": ["step 1", "step 2", ...]}"""
+{"reasoning": "<one short sentence on what you see and the strategy>",
+ "steps": [{"task": "<imperative instruction>", "contact_xy": [x, y]}, ...]}"""
+
+VERIFY_PROMPT = """\
+You are verifying a robot's progress from an overhead photo. You are told the step it just attempted
+and the overall goal. Decide whether that step now looks complete in the image.
+Respond with ONLY this JSON: {"done": true|false, "reason": "<short reason>"}"""
 
 
-# ---------------------------------------------------------------------------- frame sources
+# ---------------------------------------------------------------------------- Astra (Responses API)
+
+
+def encode_frame(rgb: np.ndarray) -> str:
+    ok, jpg = cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok:
+        raise SystemExit("could not JPEG-encode the frame")
+    return "data:image/jpeg;base64," + base64.b64encode(jpg.tobytes()).decode("ascii")
+
+
+def astra(system: str, user_text: str, image_rgb: np.ndarray | None = None, max_tokens: int = 2048) -> str:
+    """One call to Astra's Responses API; returns the model's text. Raises SystemExit on any failure."""
+    import httpx
+
+    base = env_str("NIM_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    model = env_str("NIM_PLANNER_MODEL", DEFAULT_MODEL)
+    key = required_env("NIM_API_KEY")
+    content: list[dict] = [{"type": "input_text", "text": user_text}]
+    if image_rgb is not None:
+        content.append({"type": "input_image", "image_url": encode_frame(image_rgb)})
+    body = {
+        "model": model,
+        "instructions": system,
+        "input": [{"role": "user", "content": content}],
+        "max_output_tokens": max_tokens,
+    }
+    try:
+        resp = httpx.post(f"{base}/responses",
+                          headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                          json=body, timeout=120)
+    except httpx.HTTPError as exc:
+        raise SystemExit(f"could not reach Astra at {base}: {exc}")
+    if resp.status_code != 200:
+        raise SystemExit(f"Astra returned HTTP {resp.status_code}: {resp.text[:400]}\n"
+                         "Check NIM_BASE_URL, NIM_API_KEY and NIM_PLANNER_MODEL in .env.local.")
+    data = resp.json()
+    text = data.get("output_text") or "".join(
+        chunk.get("text", "")
+        for item in data.get("output", [])
+        for chunk in item.get("content", [])
+        if chunk.get("type") == "output_text"
+    )
+    if not text.strip():
+        raise SystemExit(f"Astra returned no text: {json.dumps(data)[:400]}")
+    return text
+
+
+def _extract_json(content: str) -> dict:
+    """Pull the first JSON object out of a reply, tolerating <think> blocks and surrounding prose."""
+    text = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
+    raise SystemExit(f"could not parse JSON from Astra's reply:\n{content[:800]}")
+
+
+def _contact_point(raw) -> list[int] | None:
+    if isinstance(raw, (list, tuple)) and len(raw) == 2 and all(isinstance(v, (int, float)) for v in raw):
+        return [int(raw[0]), int(raw[1])]
+    return None
+
+
+def plan(rgb: np.ndarray, goal: str) -> tuple[str, list[dict]]:
+    """Ask Astra for the ordered steps and their contact points from the scene frame."""
+    print(f"[astra] planning {goal!r} ...")
+    obj = _extract_json(astra(SYSTEM_PROMPT, f"Goal: {goal}. Plan the ordered steps from this scene.", rgb))
+    raw_steps = obj.get("steps")
+    if not isinstance(raw_steps, list):
+        raise SystemExit(f"Astra did not return a steps list:\n{json.dumps(obj)[:600]}")
+    steps = []
+    for item in raw_steps:
+        if not isinstance(item, dict):
+            continue
+        task = " ".join(str(item.get("task", "")).split())[:MAX_TASK_CHARS]
+        if task:
+            steps.append({"task": task, "contact_xy": _contact_point(item.get("contact_xy"))})
+    if not steps:
+        raise SystemExit("Astra returned an empty plan")
+    return str(obj.get("reasoning", "")).strip(), steps[:MAX_TASKS]
+
+
+def verify(rgb: np.ndarray, task: str, goal: str) -> tuple[bool, str]:
+    """Ask Astra whether the attempted step now looks complete in the current frame."""
+    obj = _extract_json(astra(
+        VERIFY_PROMPT,
+        f"Goal: {goal}. The robot just attempted this step: {task!r}. Is this step complete now?",
+        rgb, max_tokens=256))
+    return bool(obj.get("done")), str(obj.get("reason", "")).strip()
+
+
+# ---------------------------------------------------------------------------- frames / overlay
 
 
 def load_image(path: str) -> np.ndarray:
@@ -76,175 +181,174 @@ def load_image(path: str) -> np.ndarray:
 
 
 def grab_camera(device: str) -> np.ndarray:
-    """Open a camera device directly and grab one frame (fails if the robot already owns it)."""
     cap = cv2.VideoCapture(device, cv2.CAP_V4L2)
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
     try:
-        for _ in range(10):  # let auto-exposure settle
+        ok, frame = False, None
+        for _ in range(10):
             ok, frame = cap.read()
         if not ok or frame is None:
-            raise SystemExit(f"could not grab a frame from {device!r} (is the robot using it? use --from-room)")
+            raise SystemExit(f"could not grab a frame from {device!r} (is the robot using it? run the director instead)")
         return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     finally:
         cap.release()
 
 
-async def grab_from_room(timeout_s: float = 10.0) -> np.ndarray:
-    """Grab the overhead camera's first frame from the running robot, via a Portal operator that never drives."""
-    from livekit.portal import Operator, OperatorConfig, frame_bytes_to_numpy_rgb
-
-    url, room = required_env("LIVEKIT_URL"), required_env("LIVEKIT_ROOM")
-    op = Operator(OperatorConfig.from_yaml_file(CONFIG_PATH, room))
-    got: asyncio.Future[np.ndarray] = asyncio.get_running_loop().create_future()
-
-    def on_frame(name: str, frame) -> None:
-        if not got.done():
-            got.set_result(frame_bytes_to_numpy_rgb(frame.data, frame.width, frame.height))
-
-    op.on_video_frame(OVERHEAD_TRACK, on_frame)
-    try:
-        await op.connect(url, mint_token("scene-planner", room))
-        return await asyncio.wait_for(got, timeout_s)
-    except asyncio.TimeoutError:
-        raise SystemExit(f"no {OVERHEAD_TRACK} frame within {timeout_s:g}s; is `uv run robot` running?")
-    finally:
-        try:
-            await op.disconnect()
-        finally:
-            op.close()
+def overlay_markers(rgb: np.ndarray, points: list, labels: bool = True) -> np.ndarray:
+    """Draw the contact points on a copy of the frame (for the saved plan image / UI)."""
+    out = rgb.copy()
+    for i, pt in enumerate(points, 1):
+        if not pt:
+            continue
+        x, y = int(pt[0]), int(pt[1])
+        cv2.circle(out, (x, y), 12, (0, 255, 0), 2)
+        cv2.circle(out, (x, y), 3, (0, 255, 0), -1)
+        if labels:
+            cv2.putText(out, str(i), (x + 14, y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    return out
 
 
-# ---------------------------------------------------------------------------- the VLM call
+def emit(reasoning: str, steps: list[dict], frame: np.ndarray | None) -> None:
+    PLAN_PATH.write_text(json.dumps({"goal_reasoning": reasoning, "steps": steps}, indent=2))
+    print(f"\n[astra] strategy: {reasoning}\n")
+    for i, step in enumerate(steps, 1):
+        at = f"  @ {step['contact_xy']}" if step.get("contact_xy") else ""
+        print(f"  {i}. {step['task']}{at}")
+    if frame is not None:
+        annotated = overlay_markers(frame, [s.get("contact_xy") for s in steps])
+        cv2.imwrite(str(ANNOTATED_PATH), cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
+        print(f"\n[astra] annotated scene -> {ANNOTATED_PATH}")
+    print(f"[astra] plan -> {PLAN_PATH}")
+    cmd = " ".join(f'--task "{s["task"]}"' for s in steps)
+    print(f"[astra] (manual run) uv run dream-1-tasks {cmd}\n")
 
 
-def encode_frame(rgb: np.ndarray) -> str:
-    ok, jpg = cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 90])
-    if not ok:
-        raise SystemExit("could not JPEG-encode the frame")
-    return "data:image/jpeg;base64," + base64.b64encode(jpg.tobytes()).decode("ascii")
+# ---------------------------------------------------------------------------- the director
 
 
-def extract_tasks(content: str) -> tuple[str, list[str]]:
-    """Pull the reasoning and task list out of the model's reply, tolerating <think> blocks and prose."""
-    text = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-    obj = None
-    try:
-        obj = json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, flags=re.DOTALL)  # first JSON object anywhere in the reply
-        if match:
-            try:
-                obj = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                obj = None
-    if not isinstance(obj, dict) or not isinstance(obj.get("tasks"), list):
-        raise SystemExit(f"could not parse a task list from the model reply:\n{content[:800]}")
-    tasks = []
-    for item in obj["tasks"]:
-        task = " ".join(str(item).split())
-        if task:
-            tasks.append(task[:MAX_TASK_CHARS])
-    if not tasks:
-        raise SystemExit("the model returned an empty task list")
-    return str(obj.get("reasoning", "")).strip(), tasks[:MAX_TASKS]
+class Director:
+    """One Portal connection that grabs the overhead frame and drives dream-1-tasks; it never drives the arms."""
 
+    def __init__(self) -> None:
+        self.op = None
+        self._frame: np.ndarray | None = None
+        self._decode = None
 
-def plan_tasks(rgb: np.ndarray, goal: str) -> tuple[str, list[str]]:
-    import httpx
+    async def connect(self) -> None:
+        from livekit.portal import Operator, OperatorConfig, frame_bytes_to_numpy_rgb
 
-    base = env_str("NIM_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
-    model = env_str("NIM_PLANNER_MODEL", DEFAULT_MODEL)
-    key = required_env("NIM_API_KEY")
-    body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": [
-                {"type": "text", "text": f"Goal: {goal}. Plan the ordered steps from this scene."},
-                {"type": "image_url", "image_url": {"url": encode_frame(rgb)}},
-            ]},
-        ],
-        "max_tokens": 2048,
-        "temperature": 0.2,
-    }
-    print(f"[planner] asking {model} at {base} ...")
-    try:
-        resp = httpx.post(f"{base}/chat/completions",
-                          headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
-                          json=body, timeout=120)
-    except httpx.HTTPError as exc:
-        raise SystemExit(f"could not reach the NIM endpoint {base}: {exc}")
-    if resp.status_code != 200:
-        raise SystemExit(f"NIM returned HTTP {resp.status_code}: {resp.text[:400]}\n"
-                         "Check NIM_BASE_URL, NIM_API_KEY and NIM_PLANNER_MODEL in .env.local.")
-    return extract_tasks(resp.json()["choices"][0]["message"]["content"])
-
-
-# ---------------------------------------------------------------------------- output / drive
-
-
-def emit(reasoning: str, tasks: list[str]) -> None:
-    PLAN_PATH.write_text(json.dumps({"goal_reasoning": reasoning, "tasks": tasks}, indent=2))
-    print(f"\n[planner] strategy: {reasoning}\n")
-    for i, task in enumerate(tasks, 1):
-        print(f"  {i}. {task}")
-    args = " ".join(f'--task "{t}"' for t in tasks)
-    print(f"\n[planner] plan written to {PLAN_PATH}")
-    print(f"[planner] run it with:\n  uv run dream-1-tasks {args}\n")
-
-
-async def drive(tasks: list[str]) -> None:
-    """Walk dream-1-tasks through the plan: set each task, resume, wait for Enter. Never drives the arms here."""
-    from livekit import rtc
-
-    url, room = required_env("LIVEKIT_URL"), required_env("LIVEKIT_ROOM")
-    client = rtc.Room()
-    await client.connect(url, mint_token("scene-planner", room))
-    try:
-        if DREAM_TASKS_IDENTITY not in client.remote_participants:
+        url, room = required_env("LIVEKIT_URL"), required_env("LIVEKIT_ROOM")
+        self._decode = frame_bytes_to_numpy_rgb
+        self.op = Operator(OperatorConfig.from_yaml_file(CONFIG_PATH, room))
+        self.op.on_video_frame(OVERHEAD_TRACK, self._on_frame)
+        await self.op.connect(url, mint_token("astra-director", room))
+        if DREAM_TASKS_IDENTITY not in self.op.operators():
+            await self.close()
             raise SystemExit(f"{DREAM_TASKS_IDENTITY} is not in the room; start `uv run dream-1-tasks` first")
+        await self._wait_frame()
 
-        async def rpc(method: str, payload: dict) -> None:
-            await client.local_participant.perform_rpc(
-                destination_identity=DREAM_TASKS_IDENTITY, method=method,
-                payload=json.dumps(payload), response_timeout=5.0)
+    def _on_frame(self, _name: str, frame) -> None:
+        self._frame = self._decode(frame.data, frame.width, frame.height)
 
-        print("\n[planner] driving the plan. A hand on the park key (p). Ctrl-C stops.\n")
-        for i, task in enumerate(tasks, 1):
-            input(f"[planner] step {i}/{len(tasks)} -- press Enter to set and run: {task!r} > ")
-            await rpc(DREAM_SET_TASK_RPC, {"task": task})
-            await rpc(DREAM_RESUME_RPC, {})
-            print(f"[planner] Dream-1 driving step {i}. Press Enter when it is done to continue.")
-            input()
-        print("[planner] plan complete.")
-    finally:
-        await client.disconnect()
+    async def _wait_frame(self, timeout_s: float = 10.0) -> np.ndarray:
+        deadline = time.monotonic() + timeout_s
+        while self._frame is None and time.monotonic() < deadline:
+            await asyncio.sleep(0.1)
+        if self._frame is None:
+            raise SystemExit(f"no {OVERHEAD_TRACK} frame within {timeout_s:g}s; is `uv run robot` running?")
+        return self._frame
+
+    @property
+    def frame(self) -> np.ndarray:
+        assert self._frame is not None
+        return self._frame
+
+    async def _rpc(self, method: str, payload: dict | None = None) -> str:
+        return await self.op.perform_rpc(method, payload=json.dumps(payload or {}),
+                                         destination=DREAM_TASKS_IDENTITY, response_timeout_ms=5000)
+
+    async def cook(self, goal: str, *, auto: bool, verify_every_s: float, step_timeout_s: float) -> None:
+        reasoning, steps = await asyncio.to_thread(plan, self.frame, goal)
+        emit(reasoning, steps, self.frame)
+        print("[astra] directing Dream-1. A hand on the park key (p). Ctrl-C stops.\n")
+        for i, step in enumerate(steps, 1):
+            task, point = step["task"], step.get("contact_xy")
+            if not auto:
+                input(f"[astra] step {i}/{len(steps)} -- Enter to run: {task!r}{f' @ {point}' if point else ''} > ")
+            await self._rpc(DREAM_SET_MARKERS_RPC, {"points": [point] if point else []})
+            await self._rpc(DREAM_SET_TASK_RPC, {"task": task})
+            await self._rpc(DREAM_RESUME_RPC)
+            print(f"[astra] step {i} running: {task!r}")
+            done = await self._watch_step(task, goal, verify_every_s, step_timeout_s)
+            await self._rpc(DREAM_PAUSE_RPC)
+            print(f"[astra] step {i} {'done' if done else 'timed out; pausing'}: {task!r}")
+            if not done and not auto:
+                if input("[astra] retry this step? [y/N] > ").strip().lower() == "y":
+                    await self._retry(step, goal, verify_every_s, step_timeout_s)
+        await self._rpc(DREAM_SET_MARKERS_RPC, {"points": []})
+        print("\n[astra] plan complete.")
+
+    async def _watch_step(self, task: str, goal: str, every_s: float, timeout_s: float) -> bool:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            await asyncio.sleep(every_s)
+            done, reason = await asyncio.to_thread(verify, self.frame, task, goal)
+            print(f"[astra]   verify: {'DONE' if done else 'not yet'} - {reason}")
+            if done:
+                return True
+        return False
+
+    async def _retry(self, step: dict, goal: str, every_s: float, timeout_s: float) -> None:
+        await self._rpc(DREAM_RESUME_RPC)
+        done = await self._watch_step(step["task"], goal, every_s, timeout_s)
+        await self._rpc(DREAM_PAUSE_RPC)
+        print(f"[astra] retry {'done' if done else 'still not done'}: {step['task']!r}")
+
+    async def close(self) -> None:
+        if self.op is not None:
+            try:
+                await self.op.disconnect()
+            finally:
+                self.op.close()
+                self.op = None
 
 
 async def amain(args: argparse.Namespace) -> None:
-    if args.image:
-        rgb = load_image(args.image)
-    elif args.camera:
-        rgb = grab_camera(args.camera)
-    else:
-        rgb = await grab_from_room()
-    reasoning, tasks = plan_tasks(rgb, args.goal)
-    emit(reasoning, tasks)
-    if args.drive:
-        await drive(tasks)
+    if args.plan_only:
+        if args.image:
+            frame = load_image(args.image)
+        elif args.camera:
+            frame = grab_camera(args.camera)
+        else:
+            director = Director()
+            await director.connect()
+            try:
+                frame = director.frame
+            finally:
+                await director.close()
+        reasoning, steps = await asyncio.to_thread(plan, frame, args.goal)
+        emit(reasoning, steps, frame)
+        return
+
+    director = Director()
+    await director.connect()
+    try:
+        await director.cook(args.goal, auto=args.auto,
+                            verify_every_s=args.verify_every, step_timeout_s=args.step_timeout)
+    finally:
+        await director.close()
 
 
 def run() -> None:
     load_env()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument("--from-room", action="store_true",
-                        help="grab the overhead frame from the running robot (default)")
-    source.add_argument("--image", help="plan from a saved image file instead")
-    source.add_argument("--camera", help="grab one frame straight from this camera device (robot not running)")
     parser.add_argument("--goal", default=DEFAULT_GOAL, help=f"the task goal (default: {DEFAULT_GOAL!r})")
-    parser.add_argument("--drive", action="store_true",
-                        help="walk dream-1-tasks through the plan, one Enter per step")
+    parser.add_argument("--plan-only", action="store_true", help="just plan and save; do not drive Dream-1")
+    parser.add_argument("--image", help="plan from a saved image (with --plan-only)")
+    parser.add_argument("--camera", help="grab one frame from this camera device (with --plan-only)")
+    parser.add_argument("--auto", action="store_true", help="run steps back to back without an Enter per step")
+    parser.add_argument("--verify-every", type=float, default=5.0, help="seconds between Astra verifications")
+    parser.add_argument("--step-timeout", type=float, default=120.0, help="seconds before a step is given up on")
     asyncio.run(amain(parser.parse_args()))
 
 

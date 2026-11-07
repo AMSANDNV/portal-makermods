@@ -32,3 +32,7 @@ __pycache__/
 # Training artifacts.
 /outputs/
 /checkpoints/
+
+# Astra director run artifacts
+plan.json
+plan_annotated.jpg

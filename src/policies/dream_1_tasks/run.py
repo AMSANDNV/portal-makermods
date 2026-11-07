@@ -22,17 +22,18 @@ import time
 from pathlib import Path
 
 import dream
+import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from livekit.portal import Operator, OperatorConfig, RpcError, frame_bytes_to_numpy_rgb
 from policies.dream_1.run import (CAMERAS, ROW_HZ, STALE_S, chunk_rows, embodiment, encode_frame, retry_delay,
                                   to_model, to_robot)
-from utils.common import (CONFIG_PATH, DREAM_PAUSE_RPC, DREAM_RESUME_RPC, DREAM_SET_TASK_RPC, DREAM_STATUS_RPC,
-                          DREAM_STOP_HAND_TELEOP_RPC, DREAM_TASKS_IDENTITY, DREAM_TO_HAND_TELEOP_RPC,
-                          DREAM_TO_TELEOP_RPC, TELEOPERATOR_IDENTITY, HardwareThread, claim_or_release, env_float,
-                          env_int, env_str, hand_teleop_identity, load_env, mint_token, pace, request_park,
-                          required_env)
+from utils.common import (CONFIG_PATH, DREAM_PAUSE_RPC, DREAM_RESUME_RPC, DREAM_SET_MARKERS_RPC, DREAM_SET_TASK_RPC,
+                          DREAM_STATUS_RPC, DREAM_STOP_HAND_TELEOP_RPC, DREAM_TASKS_IDENTITY,
+                          DREAM_TO_HAND_TELEOP_RPC, DREAM_TO_TELEOP_RPC, TELEOPERATOR_IDENTITY, HardwareThread,
+                          claim_or_release, env_float, env_int, env_str, hand_teleop_identity, load_env, mint_token,
+                          pace, request_park, required_env)
 from utils.hotkeys import Hotkeys
 from utils.metal import arm_model
 from utils.session import MAX_TASKS, preset_tasks
@@ -53,6 +54,7 @@ class TaskControl:
         self.task: str | None = presets[0] if presets else None  # None: nothing to do until a task is set
         self.changed = False
         self.hand_teleop = hand_teleop_identity()
+        self.markers: list[tuple[int, int]] = []  # overhead contact points (px) the Astra director sets
 
     def driving(self) -> bool:
         return self.op.active_operator() == self.op.local_identity()
@@ -109,6 +111,19 @@ class TaskControl:
             await self._hand_to(None)
         return self.status()
 
+    async def set_markers(self, points: list) -> dict:
+        """Store the overhead contact points (pixels) the Astra director wants overlaid on Dream-1's frame."""
+        clean: list[tuple[int, int]] = []
+        for point in points or []:
+            if isinstance(point, (list, tuple)) and len(point) == 2:
+                try:
+                    clean.append((int(point[0]), int(point[1])))
+                except (TypeError, ValueError):
+                    continue
+        self.markers = clean
+        print(f"[{WHO}] markers: {self.markers}")
+        return self.status()
+
     async def _to_human(self, identity: str, name: str, start: str, who: str) -> dict:
         """Hand control to a human's operator, only one that is connected: else Dream-1 keeps what it has."""
         if identity not in self.op.operators():
@@ -150,6 +165,8 @@ class TaskControl:
                                     handler(lambda _payload, who: self.to_hand_teleop(who)))
         self.op.register_rpc_method(DREAM_STOP_HAND_TELEOP_RPC,
                                     handler(lambda _payload, who: self.stop_hand_teleop(who)))
+        self.op.register_rpc_method(DREAM_SET_MARKERS_RPC,
+                                    handler(lambda payload, _who: self.set_markers(payload.get("points", []))))
 
 
 def session_tasks(given: list[str] | None) -> list[str]:
@@ -189,7 +206,14 @@ async def main() -> None:
         frames = {}
         for role, track in CAMERAS.items():
             frame = obs.frames[track]
-            frames[f"video.{role}"] = encode_frame(frame_bytes_to_numpy_rgb(frame.data, frame.width, frame.height))
+            rgb = frame_bytes_to_numpy_rgb(frame.data, frame.width, frame.height)
+            if role == "overhead" and tasks.markers:
+                # Draw the Astra director's contact points on the overhead view Dream-1 reads (visual prompting).
+                for mx, my in tasks.markers:
+                    if 0 <= mx < rgb.shape[1] and 0 <= my < rgb.shape[0]:
+                        cv2.circle(rgb, (mx, my), 10, (0, 255, 0), 2)
+                        cv2.circle(rgb, (mx, my), 2, (0, 255, 0), -1)
+            frames[f"video.{role}"] = encode_frame(rgb)
         row = to_model(obs.state)
         client.set_observation(frames, {
             "prompt": task,

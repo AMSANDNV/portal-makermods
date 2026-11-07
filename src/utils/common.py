@@ -41,6 +41,7 @@ DREAM_RESUME_RPC = "dream.resume"  # Dream-1 takes control, starting a new episo
 DREAM_TO_TELEOP_RPC = "dream.to_teleop"  # control passes to the teleoperator's leader arms
 DREAM_TO_HAND_TELEOP_RPC = "dream.to_hand_teleop"  # control passes to the webcam hand teleop
 DREAM_STOP_HAND_TELEOP_RPC = "dream.stop_hand_teleop"  # the hand teleop loses control: no operator; the arms hold
+DREAM_SET_MARKERS_RPC = "dream.set_markers"  # {"points": [[x, y], ...]} overlaid on the overhead frame Dream-1 sees
 
 # The task monitor (`uv run task-monitor`) watches dream-1-tasks drive and calls this on the voice agent with its
 # report as JSON, every few seconds and at once on a verdict (see src/task_monitor.py).
