@@ -23,7 +23,7 @@ from typing import Optional, Sequence
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from utils.metal import GRIPPER_MAX_MM, SIDES
+from utils.metal import SIDES, arm_model, gripper_max_mm
 
 # MediaPipe's landmark indices.
 WRIST, THUMB_TIP, INDEX_MCP, INDEX_TIP = 0, 4, 5, 8
@@ -307,7 +307,7 @@ class Mapping:
     hold_rad: float = math.radians(1.5)  # and its turn this far
     slip_m: float = 0.015  # the target this far from where the IK could go moves the anchor along
     slip_rad: float = math.radians(10)
-    takeover_mm: float = 0.1 * GRIPPER_MAX_MM  # the pinch must come this close to the gripper to take it
+    takeover_mm: float = field(default_factory=lambda: 0.1 * gripper_max_mm())
 
     def gain(self, speed_m_s: float) -> float:
         """How much of the hand's motion the tool makes at this hand speed, before `scale`."""
@@ -317,7 +317,7 @@ class Mapping:
 
     def grip_mm(self, pinch_m: float) -> float:
         span = max(self.pinch_open_m - self.pinch_closed_m, 1e-6)
-        return float(np.clip((pinch_m - self.pinch_closed_m) / span, 0.0, 1.0)) * GRIPPER_MAX_MM
+        return float(np.clip((pinch_m - self.pinch_closed_m) / span, 0.0, 1.0)) * gripper_max_mm()
 
 
 @dataclass
@@ -487,7 +487,7 @@ class ArmsIK:
         from dream_ik.specs import Region
 
         floor = (Region(lo=(None, None, table_z_m)),)
-        self._ik = ChunkIK("metal", "tcp", hz=fps, obstacles={side: floor for side in SIDES})
+        self._ik = ChunkIK(arm_model(), "tcp", hz=fps, obstacles={side: floor for side in SIDES})
         for group in self._ik._groups:  # dream_ik keeps its weights internal (pinned in uv.lock)
             group.w = {**group.w, "ori": jnp.full_like(group.w["ori"], self.TURN_WEIGHT)}
         self._rows = [self._ik.sides.index(side) for side in SIDES]  # the IK orders sides (right, left)

@@ -34,6 +34,7 @@ from utils.common import (CONFIG_PATH, DREAM_PAUSE_RPC, DREAM_RESUME_RPC, DREAM_
                           env_int, env_str, hand_teleop_identity, load_env, mint_token, pace, request_park,
                           required_env)
 from utils.hotkeys import Hotkeys
+from utils.metal import arm_model
 from utils.session import MAX_TASKS, preset_tasks
 
 WHO = "dream-1-tasks"
@@ -176,7 +177,7 @@ async def main() -> None:
     await worker.run(client.policy, {
         "checkpoint": env_str("DREAM_CHECKPOINT", "dreamlabs/dream-1-beta"),
         "embodiment": embodiment(),
-        "ik": {"arm": "metal", "head": "eef"},
+        "ik": {"arm": arm_model(), "head": "eef"},
         "action_hz": ROW_HZ,
     })
 

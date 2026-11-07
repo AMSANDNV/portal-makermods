@@ -45,16 +45,22 @@ The robot starts with no active operator. On a gate change it clears its cached
 action, so the previous operator’s command is not reused while waiting for the
 new operator. If the active operator disconnects, it also releases the gate.
 
+`uv run robot --parked` opens the arms read-only and streams state and video
+without enabling motors; it assumes torque is already off. Actions are ignored
+until an explicit `p` powers the arms up from a supported resting pose.
+
 The followers ramp each joint target at most `METAL_MAX_STEP_RAD` per command,
 starting from the measured pose and again after any pause in commands, and clamp
-every joint to the soft limits. An arm is never commanded before it has
+every joint to the selected model's soft limits (`MAKERMODS_MODEL`, `metal` by default,
+or `makers` for Maker Arm v1). Both models park at the pose captured at startup.
+An arm is never commanded before it has
 been read. This limits command changes during takeover; it is not a guarantee of
 physical motor speed.
 
 A failed arm read is logged and counted instead of ending the loop; that tick
 publishes no state. A camera hiccup serves the last good frame.
 
-A Metal arm has no brakes and drops when disabled, so a fault never disables
+A MakerMods arm has no brakes and drops when disabled, so a fault never disables
 the motors. The one switch-off is a park, which `p` asks for over a Portal RPC
 and every robot exit runs first: walk each follower back to the pose read at
 startup, check it arrived, switch it off, and reopen it read-only so state keeps

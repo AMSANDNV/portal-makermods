@@ -1,4 +1,4 @@
-"""Robot side: the two Metal followers and three cameras behind a Portal `Robot`.
+"""Robot side: two MakerMods followers and three cameras behind a Portal `Robot`.
 
 Run with `uv run robot`, with the followers resting: that pose is where they park. Each tick
 reads both arms and the cameras, publishes them on one timestamp so operators match them into
@@ -16,6 +16,7 @@ stay parked.
 
 `uv run robot --check-arms` prints the followers' joints with the motors off: move an arm to see
 which link it is on.
+`uv run robot --parked` starts read-only with torque already off; p powers up when ready.
 """
 from __future__ import annotations
 
@@ -96,7 +97,7 @@ def diagnostics(followers, budget: TickBudget) -> Iterator[str]:
         yield f"speed cap: {clamped} joint commands ramped in 5s"
 
 
-async def main() -> None:
+async def main(*, start_parked: bool = False) -> None:
     load_env()
     url, room = required_env("LIVEKIT_URL"), required_env("LIVEKIT_ROOM")
     cfg = RobotConfig.from_yaml_file(CONFIG_PATH, room)
@@ -104,7 +105,7 @@ async def main() -> None:
     tracks = list(cfg.video_tracks)
 
     followers = build_followers(tracks, fps)
-    followers.connect()  # opens both arms or neither
+    followers.connect(energize=not start_parked)  # opens both arms or neither
     robot = Robot(cfg)
     hardware = HardwareThread("followers")
     hotkeys = Hotkeys(global_tap=False)  # this terminal only; works over SSH
@@ -175,6 +176,8 @@ async def main() -> None:
         await robot.connect(url, mint_token(ROBOT_IDENTITY, room))
         hotkeys.start()
         print(f"[robot] connected; cameras={tracks}; {fps} fps; p parks or powers up, ctrl-c parks and stops")
+        if followers.parked:
+            print("[robot] started parked: read-only, still streaming; p powers up from a supported rest pose")
         async for tick in pace(fps):
             if "p" in hotkeys.drain():
                 parking.ask("this terminal", PARK_TOGGLE)
@@ -228,12 +231,20 @@ async def main() -> None:
 
 def run() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--check-arms", action="store_true", help="print the followers' joints, motors off")
-    if parser.parse_args().check_arms:
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check-arms", action="store_true", help="print the followers' joints, motors off")
+    mode.add_argument("--list-adapters", action="store_true", help="list candleLight USB serials without contacting motors")
+    mode.add_argument("--parked", action="store_true", help="start read-only with torque already off; p powers up")
+    args = parser.parse_args()
+    if args.list_adapters:
+        from utils.gs_usb_transport import available_gs_usb_ports
+
+        print("\n".join(available_gs_usb_ports()) or "No candleLight adapters visible; check USB access and libusb.")
+    elif args.check_arms:
         load_env()
         check_arms()
     else:
-        asyncio.run(main())
+        asyncio.run(main(start_parked=args.parked))
 
 
 if __name__ == "__main__":

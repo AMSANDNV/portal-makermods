@@ -42,8 +42,60 @@ Run `uv sync` there afterwards and check its hardware settings.
 
 ## CAN adapters
 
-Dream's driver opens `/dev/...` paths as serial (SLCAN) adapters at 1 Mbps,
-and any other name as a SocketCAN link, which must already be up at 1 Mbps.
+`gs_usb:<exact serial>` opens a candleLight adapter directly over USB at 1 Mbps.
+Other channels use Dream's driver: `/dev/...` paths are serial (SLCAN) adapters
+at 1 Mbps; other names are SocketCAN links, which must already be up at 1 Mbps.
+
+### Maker Arm v1 and macOS
+
+Set `MAKERMODS_MODEL=makers` on **every peer** for Maker Arm v1; the default
+`metal` is for the different Damiao motors in Metal arms. This selects the
+RobStride driver, its joint limits, the 80 mm gripper scale, and the `makers`
+IK in Dream-1 and webcam hand teleop. Metal keeps its 100 mm gripper scale.
+ACT checkpoints and recordings must match the arm model. The existing
+`METAL_*` settings keep their names for both models.
+
+On macOS, a candleLight adapter has no `/dev/cu.*` serial port. Install the
+USB library, then list its serial number without contacting motors:
+
+```bash
+brew install libusb
+uv sync
+uv run robot --list-adapters
+```
+
+Reconnect one adapter at a time to identify it, accept macOS's accessory
+prompt, and assign **different** serials to the two followers:
+
+```dotenv
+MAKERMODS_MODEL=makers
+METAL_FOLLOWER_LEFT_CAN=gs_usb:LEFT_ADAPTER_SERIAL
+METAL_FOLLOWER_RIGHT_CAN=gs_usb:RIGHT_ADAPTER_SERIAL
+METAL_MAX_STEP_RAD=0.02
+PORTAL_HOTKEYS_GLOBAL=0
+```
+
+The transport selects an exact serial, bounds USB I/O, and never resets or
+rescans the other arm's adapter. It is adapted from
+[MakerMods Lab's transport](https://github.com/makermods-robotics/makermodslab/blob/main/makermodslab/gs_usb_transport.py).
+A serial SLCAN adapter instead uses its `/dev/cu.usbmodem...` path.
+
+Zero-calibrate Maker Arm v1 in MakerMods Lab using **its folded zero pose**.
+Measure each gripper's closed/open motor angles there and set the same
+`METAL_*_GRIPPER_*_DEG` variables as chapter 1. Its open angle is **less** than
+its closed angle; do not use the Metal example's positive open angles.
+Close Lab before running `uv run robot --check-arms`. This check opens the
+arms read-only. A normal `uv run robot` energizes them, so first rest both
+arms where they can go limp: both models park at the pose captured at startup.
+Keep that pose inside the operating limits. For Maker Arm v1, the shoulder
+lift must be below -3.2° and the elbow above +2.8°, so use supports slightly
+away from the fully folded calibration pose.
+
+For the three robot cameras, use macOS camera indices (`0`, `1`, `2`, after
+checking their views) in `METAL_CAM_OVERHEAD`, `METAL_CAM_LEFT_WRIST`, and
+`METAL_CAM_RIGHT_WRIST`. The Linux `/dev/videoN` defaults do not work on macOS.
+The tutorial's leader process reads matching CAN arms; a Star 102 serial
+leader needs its own integration and must not be configured as a CAN arm.
 
 **Serial adapters**
 
@@ -92,6 +144,10 @@ back to that pose at `METAL_PARK_DEG_S`, checks they arrived, switches them off,
 and reopens them read-only so state keeps flowing. `p` in the robot terminal,
 teleop, Dream-1, or ACT parks, or powers parked arms up. Ctrl-C, or any other
 exit, parks before the robot stops.
+
+For bring-up with torque already off, `uv run robot --parked` starts read-only:
+state and video flow, but actions are ignored until `p` powers up. It does not
+send a torque-off command to an arm that was already powered elsewhere.
 
 Each `p` is a `park` RPC to the robot with an empty payload, a toggle. The
 payload `"park"` only parks: on parked arms it does nothing, and it cancels a
@@ -145,8 +201,9 @@ shell values. Relative output paths use the working directory.
 |---|---|---|
 | `METAL_GRIPPER_CLOSED_DEG`, `METAL_GRIPPER_OPEN_DEG` | required | gripper motor angle with the jaws closed / open; per arm as `METAL_{LEFT,RIGHT}_GRIPPER_*_DEG` |
 | `METAL_GRIPPER_HOLD_NM` | `0.5` | the gripper's holding torque on an object, N.m |
-| `METAL_FOLLOWER_LEFT_CAN`, `METAL_FOLLOWER_RIGHT_CAN` | required on the robot host | serial path or SocketCAN link per arm |
-| `METAL_LEADER_LEFT_CAN`, `METAL_LEADER_RIGHT_CAN` | required on the teleop host | serial path or SocketCAN link per arm |
+| `MAKERMODS_MODEL` | `metal` | `makers` for Maker Arm v1; set consistently on every peer |
+| `METAL_FOLLOWER_LEFT_CAN`, `METAL_FOLLOWER_RIGHT_CAN` | required on the robot host | serial path, SocketCAN link, or `gs_usb:<serial>` per arm |
+| `METAL_LEADER_LEFT_CAN`, `METAL_LEADER_RIGHT_CAN` | required on the teleop host | matching CAN arms, not Star serial leaders |
 | `METAL_PARK_DEG_S` | `10` | joint speed while parking or returning home |
 | `METAL_CAM_OVERHEAD`, `METAL_CAM_LEFT_WRIST`, `METAL_CAM_RIGHT_WRIST` | `/dev/video0`, `/dev/video2`, `/dev/video4` | Linux camera device path. |
 | `METAL_CAM_WIDTH` / `_HEIGHT` | `640` / `480` | a 16:9 mode such as 1280x720 suits Dream-1 better; it center-crops otherwise |
@@ -219,6 +276,16 @@ It reads LiveKit settings and `PORTAL_FPS` as the teleoperator does, selects
 CUDA/MPS/CPU automatically, and waits for the `c` handoff before producing actions.
 
 ## Troubleshooting
+
+- **`cv2` has no `ROTATE_90_CLOCKWISE` (or no `__version__`).** Overlapping
+  OpenCV wheels can remove one another's shared `cv2` files when dependency
+  groups change. This project uses only `opencv-python-headless`, including
+  with the `hands` group; its windows use Rerun. Repair an older environment
+  with `uv sync --reinstall-package opencv-python-headless` after updating the
+  project and lockfile. Avoid adding another OpenCV wheel to this environment.
+- **`VIRTUAL_ENV` does not match `.venv`.** Another project's environment is
+  active. Run `deactivate`, or prefix this project's commands with
+  `env -u VIRTUAL_ENV`, for example `env -u VIRTUAL_ENV uv run robot --parked`.
 
 - **The robot refuses to start: `still powered from an earlier session`.** The
   last robot crashed or its park could not finish, so the joints still hold.

@@ -9,15 +9,23 @@ cameras, and recorder, and a **teleop host** for the leaders. Both need Python
 repository, and both must reach one LiveKit server. Other layouts are in the
 [reference](09-reference.md#other-host-layouts).
 
+For **Maker Arm v1** (RobStride motors) or **macOS with candleLight USB-CAN**,
+first follow the [model and macOS setup](09-reference.md#maker-arm-v1-and-macos).
+The walkthrough below defaults to Metal (Damiao motors); its calibration angles
+must not be copied to a Maker Arm v1.
+
 ## 1. Prepare the hardware
 
 1. Mount two Metal followers, two Metal leaders, and three USB cameras:
    overhead, left wrist, and right wrist. Left and right are as the robot sees
    them, standing behind the arms.
 2. Connect one USB-CAN adapter per arm.
-3. Rest the followers where they can go limp, such as folded on their stops.
+3. Rest the followers where they can go limp, supported within their joint limits.
    The robot records this pose when it starts and parks the arms there. The
    arms have no brakes: support any arm you power off by hand.
+   On Maker Arm v1, unfold the shoulder lift and elbow slightly from the
+   calibration pose: their operating limits stop short of zero. The fully
+   folded zero pose is for calibration, not the robot's startup/park pose.
 4. In [MakerMods Lab](https://github.com/makermods-robotics/makermodslab),
    check the joint zeros and measure each gripper motor's angle with the jaws
    fully closed and fully open. Then **close MakerMods Lab**: it holds the
@@ -130,6 +138,11 @@ because the others wait for its clock.
    rest; wait for `connected`.
 2. **Robot host:** `uv run recorder`. Wait for its `recording to ...` line.
 3. **Teleop host:** `uv run teleoperator`. Its window shows the three views.
+
+For a first connection with motor torque already off, start the robot with
+`uv run robot --parked`. It streams state and cameras without enabling the
+motors or applying actions. Once the arms are supported within their operating
+limits and hands are clear, press `p` in that terminal to power up.
 
 To watch the room from any machine with the repository and `.env`, run
 `uv run recorder --observe-only`. It opens a Rerun window with the cameras,

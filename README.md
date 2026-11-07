@@ -22,6 +22,8 @@ You need two Metal leaders, two Metal followers, three USB cameras, Linux hardwa
 hosts, Python 3.12, `uv`, and a LiveKit server. ACT training also needs a CUDA
 machine. Dream-1 needs a Dream Labs API key, the voice agent a LiveKit Cloud
 project for LiveKit Inference, and the task monitor a GPU for its vision-language model.
+For Maker Arm v1 or a macOS robot host with candleLight USB-CAN, see the
+[model and USB setup](tutorial/09-reference.md#maker-arm-v1-and-macos).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="tutorial/images/hitl-loop-dark.svg">

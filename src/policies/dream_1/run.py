@@ -24,7 +24,7 @@ from utils.common import (CONFIG_PATH, HardwareThread, claim_or_release, env_flo
                           mint_token, pace, request_park, required_env)
 from livekit.portal import Operator, OperatorConfig, frame_bytes_to_numpy_rgb
 from utils.hotkeys import Hotkeys
-from utils.metal import GRIPPER_MAX_MM, SIDES, arm_fields, clamp_to_limits
+from utils.metal import SIDES, arm_fields, arm_model, clamp_to_limits, gripper_max_mm
 
 IDENTITY = "policy-dream-1"
 CAMERAS = {"overhead": "overhead_camera", "wrist_l": "left_wrist_camera", "wrist_r": "right_wrist_camera"}
@@ -58,7 +58,7 @@ def to_model(state: dict) -> np.ndarray:
     row = []
     for side in SIDES:
         *joints, gripper = arm_fields(side)
-        row += [state[name] for name in joints] + [min(max(state[gripper] / GRIPPER_MAX_MM, 0.0), 1.0)]
+        row += [state[name] for name in joints] + [min(max(state[gripper] / gripper_max_mm(), 0.0), 1.0)]
     return np.array(row)
 
 
@@ -66,7 +66,7 @@ def to_robot(row: np.ndarray) -> dict[str, float]:
     """14 model values -> a Portal action, inside the soft limits."""
     action = dict(zip(arm_fields("left") + arm_fields("right"), map(float, row)))
     for side in SIDES:
-        action[f"{side}_gripper.pos"] *= GRIPPER_MAX_MM
+        action[f"{side}_gripper.pos"] *= gripper_max_mm()
     return clamp_to_limits(action)
 
 
@@ -107,7 +107,7 @@ async def main() -> None:
     await worker.run(client.policy, {
         "checkpoint": env_str("DREAM_CHECKPOINT", "dreamlabs/dream-1-beta"),
         "embodiment": embodiment(),
-        "ik": {"arm": "metal", "head": "eef"},
+        "ik": {"arm": arm_model(), "head": "eef"},
         "action_hz": ROW_HZ,
     })
 

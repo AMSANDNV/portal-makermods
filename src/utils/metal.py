@@ -1,6 +1,7 @@
-"""Two Metal followers with three cameras, and two Metal leaders, over Dream Labs' `robots` driver.
+"""Two MakerMods followers with cameras and matching CAN leaders, over Dream Labs' `robots` driver.
 
 Each arm reads and takes seven values: joint1..joint6 in radians, then the gripper in mm (0 closed).
+MAKERMODS_MODEL selects metal (default) or makers (Maker Arm v1); METAL_* settings serve both.
 Followers are energized; leaders open read-only and are moved by hand. The arms have no brakes, so
 the only switch-off is `Followers.park()`, which first walks them back to where they were opened.
 See tutorial/05-robot-loop.md.
@@ -11,6 +12,7 @@ import logging
 import math
 import platform
 import time
+from dataclasses import replace
 
 import numpy as np
 
@@ -26,6 +28,41 @@ PARK_LAG_RAD = math.radians(10)  # a parking joint further behind than this is b
 PARK_TOL_RAD = math.radians(3)  # this close to rest counts as arrived
 
 
+def arm_model() -> str:
+    """Select the motor protocol and kinematics explicitly; never infer them from a USB adapter."""
+    name = env_str("MAKERMODS_MODEL", "metal")
+    if name not in ("metal", "makers"):
+        raise ValueError("MAKERMODS_MODEL must be metal or makers (Maker Arm v1)")
+    return name
+
+
+def _driver():
+    from robots import makers, metal
+
+    return makers if arm_model() == "makers" else metal
+
+
+def gripper_max_mm() -> float:
+    return 80.0 if arm_model() == "makers" else GRIPPER_MAX_MM
+
+
+def joint_limits() -> list[tuple[float, float]]:
+    if arm_model() == "metal":
+        return LIMITS_RAD
+    return [(math.radians(j.limits_deg[0]), math.radians(j.limits_deg[1])) for j in _driver().JOINTS[:6]]
+
+
+def open_can_bus(channel: str):
+    """Exact-serial native USB, or the driver's existing serial/SocketCAN connection."""
+    if channel.startswith("gs_usb:"):
+        from utils.gs_usb_transport import open_gs_usb
+
+        return open_gs_usb(channel)
+    from robots.robstride import open_can_bus as open_driver_bus
+
+    return open_driver_bus(channel)
+
+
 def arm_fields(side: str) -> list[str]:
     """One arm's seven `portal.yaml` fields."""
     return [f"{side}_joint{i}.pos" for i in range(1, 7)] + [f"{side}_gripper.pos"]
@@ -34,8 +71,9 @@ def arm_fields(side: str) -> list[str]:
 def clamp_to_limits(action: dict[str, float]) -> dict[str, float]:
     """Every joint inside its soft limit, every gripper inside its stroke."""
     out = dict(action)
+    limits = joint_limits() + [(0.0, gripper_max_mm())]
     for side in SIDES:
-        for name, (lo, hi) in zip(arm_fields(side), LIMITS_RAD + [(0.0, GRIPPER_MAX_MM)]):
+        for name, (lo, hi) in zip(arm_fields(side), limits):
             if name in out:
                 out[name] = min(max(out[name], lo), hi)
     return out
@@ -62,7 +100,7 @@ class Arm:
     def connect(self, energize: bool | None = None) -> None:
         """Open the arm: energized for a follower, read-only for a leader, unless `energize` says otherwise."""
         try:
-            from robots import config, metal, motor_arm, robstride
+            from robots import config, motor_arm
         except ImportError as exc:
             raise RuntimeError("dreamlabs is not installed: run `uv sync`") from exc
         energize = not self.leader if energize is None else energize
@@ -73,7 +111,9 @@ class Arm:
             gripper_closed_deg=_gripper_deg(self.side, "CLOSED"),
             gripper_hold_torque_nm=env_float("METAL_GRIPPER_HOLD_NM", 0.5),
         )
-        self._arm = motor_arm.open_arm(metal.ARM, cfg, self.side, opener=robstride.open_can_bus, energize=energize)
+        # Both models park at the supported pose captured at startup, never a fixed zero pose.
+        spec = replace(_driver().ARM, rest_rad=None)
+        self._arm = motor_arm.open_arm(spec, cfg, self.side, opener=open_can_bus, energize=energize)
         self.energized = energize
         if (reading := self.read()) is None:
             raise RuntimeError(f"{self.side} arm: no pose after opening {self.can_channel}")
@@ -82,7 +122,7 @@ class Arm:
     def read(self) -> list[float] | None:
         try:
             state = self._arm.read()
-            values = [float(x) for x in state.positions_rad] + [float(state.gripper) * GRIPPER_MAX_MM]
+            values = [float(x) for x in state.positions_rad] + [float(state.gripper) * gripper_max_mm()]
             if len(values) != 7 or not all(map(math.isfinite, values)):
                 raise RuntimeError(f"bad reading {values}")
             return values
@@ -95,7 +135,7 @@ class Arm:
     def command(self, values: list[float]) -> None:
         from robots import types
 
-        gripper = min(max(values[6] / GRIPPER_MAX_MM, 0.0), 1.0)
+        gripper = min(max(values[6] / gripper_max_mm(), 0.0), 1.0)
         self._arm.write(types.ArmCommand(positions_rad=np.asarray(values[:6], dtype=np.float64), gripper=gripper))
 
     def switch_off(self) -> None:
@@ -185,10 +225,11 @@ class Followers:
         self.arms, self.cameras, self.limiter = arms, cameras, limiter
         self.parked = False
 
-    def connect(self) -> None:
+    def connect(self, *, energize: bool = True) -> None:
         for camera in self.cameras.values():
             camera._cam.connect()
-        self._open_arms(energize=True)
+        self._open_arms(energize=energize)
+        self.parked = not energize
 
     def _open_arms(self, energize: bool) -> None:
         """Open every arm, or none: an arm already energized when another fails is switched off where it
@@ -316,8 +357,11 @@ class Leaders:
 
 def _arms(role: str) -> dict[str, Arm]:
     """One arm per side, on the link `METAL_<ROLE>_<SIDE>_CAN` names; required, so arms never swap silently."""
-    return {side: Arm(side, required_env(f"METAL_{role}_{side.upper()}_CAN"), leader=role == "LEADER")
-            for side in SIDES}
+    arm_model()  # reject a misspelled model before opening anything
+    channels = {side: required_env(f"METAL_{role}_{side.upper()}_CAN") for side in SIDES}
+    if len(set(channels.values())) != len(SIDES):
+        raise ValueError("Left and right arms must use different CAN adapters")
+    return {side: Arm(side, channel, leader=role == "LEADER") for side, channel in channels.items()}
 
 
 def build_followers(tracks: list[str], fps: int) -> Followers:
@@ -344,9 +388,9 @@ def build_leaders() -> Leaders:
 def check_arms() -> None:
     """Print the followers' joints twice a second, motors off, until ctrl-c: move an arm to see its link."""
     arms = _arms("FOLLOWER")
-    for arm in arms.values():
-        arm.connect(energize=False)
     try:
+        for arm in arms.values():
+            arm.connect(energize=False)
         while True:
             for side, arm in arms.items():
                 if (values := arm.read()) is not None:

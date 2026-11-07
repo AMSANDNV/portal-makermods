@@ -9,10 +9,11 @@ dependencies = [
     "lerobot[hardware]>=0.6.1",
     "numpy>=1.24",
     "python-dotenv>=1",
-    "opencv-python>=4.5",
+    "opencv-python-headless>=4.10",
     "pynput>=1.7",
     "dreamlabs>=1.0.23",        # the `robots` arm driver and `dreamcli`
     "dreamlabs-client>=1.0.14",  # the `dream` client (Dream-1)
+    "python-can[gs-usb]>=4.5",   # native candleLight USB-CAN, including macOS
 ]
 
 # `uv run robot`, `uv run teleoperator`, `uv run recorder`, `uv run dream-1`, `uv run dream-1-tasks`, `uv run act`,
@@ -31,6 +32,14 @@ task-monitor = "task_monitor:run"
 [build-system]
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv]
+# Every OpenCV wheel owns cv2. Keep LeRobot/Dream's headless build; our UI is Rerun.
+# False markers exclude the GUI variants (including MediaPipe's) on uv 0.7 too.
+override-dependencies = [
+    "opencv-python; python_version < '0'",
+    "opencv-contrib-python; python_version < '0'",
+]
 
 [tool.setuptools]
 package-dir = { "" = "src" }

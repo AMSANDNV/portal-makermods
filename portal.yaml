@@ -16,9 +16,9 @@ videos:
   - { name: left_wrist_camera, codec: h264, max_bitrate_kbps: 20000, screencast: true }
   - { name: right_wrist_camera, codec: h264, max_bitrate_kbps: 20000, screencast: true }
 
-# The MakerMods Metal SDK's own units: joint1..joint6 in radians (the URDF's
-# frame, which Dream's `metal` IK also reads), the gripper as its stroke in mm,
-# 0 closed to 80 open.
+# The selected arm's own joint frame: joint1..joint6 in radians, the gripper
+# as stroke in mm: 0 closed to 100 open for Metal, 80 for Maker Arm v1.
+# Set MAKERMODS_MODEL consistently on every peer; models' recordings are not interchangeable.
 state:
   - { name: left_joint1.pos, dtype: f32 }
   - { name: left_joint2.pos, dtype: f32 }
