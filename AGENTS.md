@@ -55,6 +55,7 @@ uv run --group train python -m unittest test.test_act
 uv run python -m test.test_teleop
 uv run python -m test.test_resilience
 uv run python -m unittest test.test_dream1 test.test_dream1_tasks test.test_task_monitor
+uv run python -m unittest test.test_hands
 # With livekit-server --dev:
 uv run --group voice python -m test.test_voice_tasks
 uv run --group voice python -m test.test_monitor_voice

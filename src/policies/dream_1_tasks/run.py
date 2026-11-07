@@ -8,8 +8,9 @@ pause and resume Dream-1, hand the arms to the teleoperator or the webcam hand t
 hand teleop. The voice agent (`uv run voice-agent`) is one.
 
 A task change while Dream-1 drives releases control first, so the arms hold until someone resumes: a new task
-never starts motion. Each resume starts a new Dream-1 episode on the current task. Keys in this terminal: `c`
-takes or releases control, `p` parks the arms or powers them up, `1`-`9` switch task.
+never starts motion. Each resume starts a new Dream-1 episode on the current task. With no task given at start,
+Dream-1 has none and does not move, even when handed control, until one is set. Keys in this terminal: `c` takes
+or releases control, `p` parks the arms or powers them up, `1`-`9` switch task.
 """
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ from utils.common import (CONFIG_PATH, DREAM_PAUSE_RPC, DREAM_RESUME_RPC, DREAM_
                           env_int, env_str, hand_teleop_identity, load_env, mint_token, pace, request_park,
                           required_env)
 from utils.hotkeys import Hotkeys
-from utils.session import DEFAULT_TASK, MAX_TASKS, preset_tasks
+from utils.session import MAX_TASKS, preset_tasks
 
 WHO = "dream-1-tasks"
 MAX_TASK_CHARS = 200  # one instruction; anything longer is more likely a transcription accident
@@ -48,7 +49,7 @@ class TaskControl:
     def __init__(self, op: Operator, presets: list[str]) -> None:
         self.op = op
         self.presets = presets
-        self.task = presets[0]
+        self.task: str | None = presets[0] if presets else None  # None: nothing to do until a task is set
         self.changed = False
         self.hand_teleop = hand_teleop_identity()
 
@@ -84,6 +85,8 @@ class TaskControl:
 
     async def resume(self, who: str) -> dict:
         """Take control (from whoever has it), starting a new episode on the current task."""
+        if self.task is None:
+            raise ValueError("Dream-1 has no task yet; give it one first")
         if not self.driving():
             print(f"[{WHO}] {who}: resuming {self.task!r}")
             await self._hand_to(self.op.local_identity())
@@ -149,8 +152,10 @@ class TaskControl:
 
 
 def session_tasks(given: list[str] | None) -> list[str]:
-    """`--task` values, else `PORTAL_DATA_TASKS` (as in teleop), else `PORTAL_DATA_TASK`. Never empty."""
-    return (given or preset_tasks() or [env_str("PORTAL_DATA_TASK", DEFAULT_TASK)])[:MAX_TASKS]
+    """`--task` values, else `PORTAL_DATA_TASKS` (as in teleop), else `PORTAL_DATA_TASK`. Empty when none is set:
+    then Dream-1 starts with no task."""
+    single = env_str("PORTAL_DATA_TASK", "").strip()
+    return (given or preset_tasks() or ([single] if single else []))[:MAX_TASKS]
 
 
 async def main() -> None:
@@ -220,12 +225,15 @@ async def main() -> None:
         hotkeys.start()
         for number, task in enumerate(tasks.presets, start=1):
             print(f"[{WHO}]   {number}  {task}")
-        print(f"[{WHO}] ready{' (dry run)' if args.dry_run else ''} on {tasks.task!r}; "
-              f"c takes control, p parks, 1-{len(tasks.presets)} switch task")
+        on = f"on {tasks.task!r}" if tasks.task else "with no task (the voice agent sets one)"
+        switch = f", 1-{len(tasks.presets)} switch task" if tasks.presets else ""
+        print(f"[{WHO}] ready{' (dry run)' if args.dry_run else ''} {on}; c takes control, p parks{switch}")
         async for tick in pace(fps):
             for key in hotkeys.drain():
                 if key == "p":
                     await request_park(op, WHO)
+                elif key == "c" and tasks.task is None and not tasks.driving():
+                    print(f"[{WHO}] no task yet: set one by voice, or restart with --task")
                 elif key == "c":
                     await claim_or_release(op, WHO)
                 elif key.isdigit() and int(key) <= len(tasks.presets):
@@ -234,8 +242,8 @@ async def main() -> None:
                     except Exception as exc:
                         print(f"[{WHO}] could not switch task: {exc}; press {key} to retry")
             obs = latest_obs
-            if not tasks.driving():
-                continue
+            if not tasks.driving() or tasks.task is None:
+                continue  # with no task, even when handed control, send nothing: the arms hold
             if obs is None or time.monotonic() - received_at > STALE_S or set(CAMERAS.values()) - set(obs.frames):
                 continue  # no fresh view: send nothing, and the arms hold
 

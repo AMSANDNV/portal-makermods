@@ -5,15 +5,18 @@ loop is `src/hand_teleop.py`. See tutorial/11-hand-teleop.md.
 
 Two frames:
 - camera: OpenCV's, of the raw (unmirrored) webcam image: x right, y down, z away from the lens.
-  MediaPipe's world landmarks use these axes, in metres, about the hand's centre.
+  MediaPipe's world landmarks use these axes, in metres, about the hand's centre, but turned as the
+  hand looks from the lens rather than from straight ahead (see `view_rotation`).
 - base: each Metal arm's own, as dream_ik's FK has it: x forward, y to the robot's left, z up.
 
 The operator faces the webcam as if standing behind the arms, facing the workspace: a hand pushed
-toward the screen reaches forward, the operator's right is the robot's right, up is up.
+toward the screen reaches forward, the operator's right is the robot's right, up is up, and a hand
+turned one way turns the gripper the same way.
 """
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
@@ -71,38 +74,88 @@ def pinch(world: np.ndarray) -> float:
     return float(np.linalg.norm(world[THUMB_TIP] - world[INDEX_TIP]))
 
 
-def palm_position(image: np.ndarray, world: np.ndarray, focal_px: float, center_px: Sequence[float]
-                  ) -> Optional[np.ndarray]:
+def palm_size(world: np.ndarray) -> float:
+    """How big the palm is (m): its five rigid points' RMS distance from their centre."""
+    palm = world[list(PALM)]
+    return float(np.sqrt(((palm - palm.mean(axis=0)) ** 2).sum(axis=1).mean()))
+
+
+def palm_position(image: np.ndarray, world: np.ndarray, focal_px: float, center_px: Sequence[float],
+                  size_m: Optional[float] = None) -> Optional[np.ndarray]:
     """The palm's centre in the camera frame (m), or None for a degenerate hand.
 
-    Depth comes from size: the world landmarks are metric and camera-aligned, so their x-y spread
-    against the pixel spread gives pixels per metre at the hand, which is focal / depth.
+    The palm's five rigid points (wrist and knuckles), shaped and turned as the world landmarks have
+    them, are placed where they project onto their pixels (a least-squares perspective fit), so depth
+    comes from the palm's size in the image. The fingers do not count: a pinch never moves the arm.
+    `size_m` sets the palm's size: MediaPipe estimates its metric scale afresh every frame, and a few
+    percent of wander there is centimetres of depth at arm's length, so `HandSize` gives a steadier one.
     """
-    xy = world[:, :2] - world[:, :2].mean(axis=0)
-    uv = image - image.mean(axis=0)
-    px_per_m = float((uv * xy).sum() / max((xy * xy).sum(), 1e-12))
-    if px_per_m <= 1e-6:
-        return None
-    # The fit's depth is the whole hand's; the palm sits this much farther (curled fingers come forward).
-    depth = focal_px / px_per_m + world[list(PALM), 2].mean() - world[:, 2].mean()
-    u, v = image[list(PALM)].mean(axis=0)
-    return np.array([(u - center_px[0]) / focal_px * depth, (v - center_px[1]) / focal_px * depth, depth])
+    palm = world[list(PALM)] - world[list(PALM)].mean(axis=0)
+    if size_m is not None:
+        palm = palm * (size_m / max(palm_size(world), 1e-9))
+    pixels = image[list(PALM)]
+    model = palm @ view_rotation(pixels.mean(axis=0), focal_px, center_px).T  # camera axes
+    u, v = (pixels - np.asarray(center_px)).T
+    # f (X + mx) = u (Z + mz) and f (Y + my) = v (Z + mz), for the centre (X, Y, Z): linear in it.
+    a = np.zeros((2 * len(palm), 3))
+    a[0::2, 0], a[0::2, 2], a[1::2, 1], a[1::2, 2] = focal_px, -u, focal_px, -v
+    b = np.stack([u * model[:, 2] - focal_px * model[:, 0], v * model[:, 2] - focal_px * model[:, 1]], axis=1).ravel()
+    centre = np.linalg.lstsq(a, b, rcond=None)[0]
+    return centre if centre[2] > 0.05 else None
 
 
 def palm_rotation(world: np.ndarray) -> np.ndarray:
-    """The palm's axes in the camera frame: x wrist to middle knuckle, z the palm's normal, y = z × x."""
-    x = world[MIDDLE_MCP] - world[WRIST]
+    """The palm's axes in the camera frame: x from the wrist to the knuckles' middle (steadier than to
+    any one knuckle), z the palm's normal, y = z × x."""
+    x = world[[INDEX_MCP, MIDDLE_MCP, RING_MCP, PINKY_MCP]].mean(axis=0) - world[WRIST]
     x = x / max(np.linalg.norm(x), 1e-9)
     z = np.cross(x, world[INDEX_MCP] - world[PINKY_MCP])
     z = z / max(np.linalg.norm(z), 1e-9)
     return np.stack([x, np.cross(z, x), z], axis=1)
 
 
-def hand_pose(hand: Hand, at: float, focal_px: float, center_px: Sequence[float]) -> Optional[HandPose]:
-    position = palm_position(hand.image, hand.world, focal_px, center_px)
+class HandSize:
+    """The palm's size (m) as the median of the last few seconds of sightings: MediaPipe's metric scale
+    can wander from frame to frame, a hand does not."""
+
+    def __init__(self, keep: int = 150) -> None:
+        self._sizes: deque[float] = deque(maxlen=keep)
+
+    def add(self, world: np.ndarray) -> None:
+        self._sizes.append(palm_size(world))
+
+    @property
+    def value(self) -> Optional[float]:
+        return float(np.median(self._sizes)) if self._sizes else None
+
+
+def view_rotation(pixel: Sequence[float], focal_px: float, center_px: Sequence[float]) -> np.ndarray:
+    """The turn that points the lens's axis along the ray through `pixel`.
+
+    MediaPipe reads a hand's world landmarks off a crop around it, so they come turned as the hand
+    looks along that ray. Turning them by this puts them in the camera's axes; without it, a hand slid
+    toward the image's edge would read as turned by up to half the field of view.
+    """
+    ray = np.array([(pixel[0] - center_px[0]) / focal_px, (pixel[1] - center_px[1]) / focal_px, 1.0])
+    axis = np.array([-ray[1], ray[0], 0.0])  # the lens's axis (0, 0, 1) × ray
+    sin = float(np.linalg.norm(axis))
+    if sin < 1e-12:
+        return np.eye(3)
+    return Rotation.from_rotvec(axis / sin * math.atan2(sin, ray[2])).as_matrix()
+
+
+def turn_between(a: np.ndarray, b: np.ndarray) -> float:
+    """The angle (rad) of the turn from rotation `a` to rotation `b`."""
+    return float(math.acos(np.clip((np.trace(b @ a.T) - 1.0) / 2.0, -1.0, 1.0)))
+
+
+def hand_pose(hand: Hand, at: float, focal_px: float, center_px: Sequence[float],
+              size_m: Optional[float] = None) -> Optional[HandPose]:
+    position = palm_position(hand.image, hand.world, focal_px, center_px, size_m)
     if position is None:
         return None
-    return HandPose(at, position, palm_rotation(hand.world), pinch(hand.world), curl(hand.world))
+    view = view_rotation(hand.image[list(PALM)].mean(axis=0), focal_px, center_px)
+    return HandPose(at, position, view @ palm_rotation(hand.world), pinch(hand.world), curl(hand.world))
 
 
 def assign_sides(hands: Sequence[Hand], swap: bool = False) -> dict[str, Hand]:
@@ -172,6 +225,15 @@ class OneEuro:
         self._x, self._dx, self._at = np.array(x, dtype=np.float64), np.zeros_like(np.asarray(x, np.float64)), at
         return self._x.copy()
 
+    def clear(self) -> None:
+        """Start afresh: the next value is taken as it is."""
+        self._x = None
+
+    @property
+    def speed(self) -> float:
+        """How fast the input moves (its units per s, smoothed)."""
+        return 0.0 if self._x is None else float(np.linalg.norm(self._dx))
+
     def __call__(self, x, at: float) -> np.ndarray:
         if self._x is None or at <= self._at:
             return self.reset(x, at) if self._x is None else self._x.copy()
@@ -182,6 +244,31 @@ class OneEuro:
         self._x = self._x + self._alpha(cutoff, dt) * (x - self._x)
         self._at = at
         return self._x.copy()
+
+
+class OneEuroTurn:
+    """The 1€ filter on rotations: each sighting pulls the estimate along the shortest turn toward it."""
+
+    def __init__(self, min_cutoff_hz: float, beta: float, d_cutoff_hz: float = 1.0) -> None:
+        self.min_cutoff, self.beta, self.d_cutoff = min_cutoff_hz, beta, d_cutoff_hz
+        self._r: Optional[np.ndarray] = None
+        self._w = np.zeros(3)
+        self._at = 0.0
+
+    def clear(self) -> None:
+        self._r = None
+
+    def __call__(self, rotation: np.ndarray, at: float) -> np.ndarray:
+        if self._r is None:
+            self._r, self._w, self._at = np.array(rotation, dtype=np.float64), np.zeros(3), at
+        elif at > self._at:
+            dt = at - self._at
+            towards = Rotation.from_matrix(rotation @ self._r.T).as_rotvec()
+            self._w = self._w + OneEuro._alpha(self.d_cutoff, dt) * (towards / dt - self._w)
+            cutoff = self.min_cutoff + self.beta * float(np.linalg.norm(self._w))
+            self._r = Rotation.from_rotvec(OneEuro._alpha(cutoff, dt) * towards).as_matrix() @ self._r
+            self._at = at
+        return self._r.copy()
 
 
 def _twist_about_z(rotation: np.ndarray) -> float:
@@ -200,15 +287,33 @@ class Mapping:
 
     to_base: np.ndarray  # (3, 3), from `camera_to_base`
     scale: float = 1.0  # tool metres per hand metre
-    rotate: str = "off"  # "off": keep the tool's orientation; "yaw": turn about vertical only; "full"
+    fine_scale: float = 0.4  # how much of `scale` a slow hand gets: careful moves (and a still hand's wobble) shrink
+    fine_below_m_s: float = 0.04  # a hand this slow or slower moves the tool at `fine_scale`
+    full_above_m_s: float = 0.2  # this fast or faster at the full `scale`; smoothly in between
+    rotate: str = "full"  # "full": the tool turns as the hand does; "yaw": about vertical only; "off": it keeps its own
+    turn_deadband_rad: float = math.radians(5)  # the hand's turn since the grip, less this; smaller turns do nothing
+    max_hand_turn_rad: float = math.radians(90)  # past this from the grip, the hand's anchor turns along
     max_speed_m_s: float = 0.5
     max_turn_rad_s: float = math.pi
     pinch_closed_m: float = 0.03  # thumb to index tip at and below this: gripper closed
     pinch_open_m: float = 0.09  # at and above this: fully open
-    smoothing_hz: float = 1.0  # the 1€ filter's cutoff for a still hand
+    smoothing_hz: float = 1.0  # the 1€ filters' cutoffs for a still hand: across the image (the pinch twice it)
+    depth_smoothing_hz: float = 0.4  # toward the lens, where the estimate is several times noisier
+    depth_beta: float = 2.0
+    turn_smoothing_hz: float = 0.3  # and the hand's turn
+    turn_beta: float = 0.5
+    turn_d_cutoff_hz: float = 0.5
+    hold_m: float = 0.001  # the target stays put until the hand's motion takes it this far (after the scales)
+    hold_rad: float = math.radians(1.5)  # and its turn this far
     slip_m: float = 0.015  # the target this far from where the IK could go moves the anchor along
     slip_rad: float = math.radians(10)
     takeover_mm: float = 0.1 * GRIPPER_MAX_MM  # the pinch must come this close to the gripper to take it
+
+    def gain(self, speed_m_s: float) -> float:
+        """How much of the hand's motion the tool makes at this hand speed, before `scale`."""
+        t = float(np.clip((speed_m_s - self.fine_below_m_s) / max(self.full_above_m_s - self.fine_below_m_s, 1e-9),
+                          0.0, 1.0))
+        return self.fine_scale + (1.0 - self.fine_scale) * t * t * (3.0 - 2.0 * t)
 
     def grip_mm(self, pinch_m: float) -> float:
         span = max(self.pinch_open_m - self.pinch_closed_m, 1e-6)
@@ -219,11 +324,22 @@ class Mapping:
 class ArmFollower:
     """One arm following one hand's motion since the clutch closed, never the hand's absolute place.
 
-    `engage` anchors the hand's pose to the tool's. Each new sighting is filtered (`track`); each tick
-    `goal` maps the hand's displacement into the base frame onto the anchored tool pose, moving the
-    target no faster than the speed limits. Where the arm cannot follow (the floor, its reach),
-    `settle` moves the anchor so the target stays where the arm is, and the hand drives it from
+    Every sighting of the hand is filtered (`observe`), gripping or not, so a grip anchors to a settled
+    estimate rather than to one frame's noise. `engage` anchors the hand to the tool. While engaged,
+    each sighting moves the target by the hand's motion in the base frame, scaled by how fast the hand
+    goes: a slow, careful hand moves the tool at `fine_scale`, a quick one at full `scale`, like a
+    mouse. A still hand holds the tool still: the target moves only once the hand has taken it
+    `hold_m` from where it is (or turned it `hold_rad`), so jitter never reaches the arm. Each tick
+    `goal` moves toward the target no faster than the speed limits. Where the arm cannot follow (the
+    floor, its reach), `settle` moves the target to where the arm is, and the hand drives it from
     there at once instead of first having to come back.
+
+    Turning is relative too: the hand's turn since the grip turns the tool about its own point, the same
+    way as the operator sees it. The first few degrees are dropped, so a hand that only moves keeps the
+    tool steady. A turn the arm cannot make stops the tool where it can go, and the turn comes back to
+    the hand's when the hand does: with `rotate` "full", hand level is tool level (give or take the
+    hold) for the whole grip. Past `max_hand_turn_rad` the hand's anchor turns along with it: turning
+    back acts at once, and turning farther takes a new grip, as moving farther does.
 
     The gripper takes over softly: it holds where it was until the pinch comes to it, so gripping
     again with an open hand never drops what the arm is holding.
@@ -231,29 +347,64 @@ class ArmFollower:
 
     mapping: Mapping
     engaged: bool = False
-    _hand_pos: np.ndarray = field(default=None, repr=False)  # filtered, camera frame
-    _hand_turn: np.ndarray = field(default=None, repr=False)  # filtered rotvec since the anchor, camera frame
+    grip_mm: float = 0.0
+    _hand_pos: Optional[np.ndarray] = field(default=None, repr=False)  # filtered, camera frame
+    _hand_rot: Optional[np.ndarray] = field(default=None, repr=False)  # filtered, camera frame
     _pinch: float = 0.0
-    _anchor_hand_pos: np.ndarray = field(default=None, repr=False)
     _anchor_hand_rot: np.ndarray = field(default=None, repr=False)
     _anchor_tcp: np.ndarray = field(default=None, repr=False)  # (4, 4)
+    _target: np.ndarray = field(default=None, repr=False)  # (3,) where the hand's motion has put the tool
+    _held: np.ndarray = field(default=None, repr=False)  # (3,) the target, moved only past `hold_m`
+    _kept: np.ndarray = field(default=None, repr=False)  # (3, 3) the hand's turn past the deadband, held likewise
     _goal: np.ndarray = field(default=None, repr=False)  # (4, 4), the last target
     _turn: np.ndarray = field(default=None, repr=False)  # (3, 3), the last base-frame turn applied to the anchor
-    grip_mm: float = 0.0
     _grip_taken: bool = False
     _grip_side: float = 0.0
 
     def __post_init__(self) -> None:
         m = self.mapping
-        self._filters = (OneEuro(m.smoothing_hz, 4.0), OneEuro(m.smoothing_hz, 0.5), OneEuro(2 * m.smoothing_hz, 2.0))
+        self._across, self._depth = OneEuro(m.smoothing_hz, 4.0), OneEuro(m.depth_smoothing_hz, m.depth_beta)
+        self._turning = OneEuroTurn(m.turn_smoothing_hz, m.turn_beta, m.turn_d_cutoff_hz)
+        self._pinching = OneEuro(2 * m.smoothing_hz, 2.0)
 
-    def engage(self, hand: HandPose, tcp: np.ndarray, grip_mm: float) -> None:
+    def observe(self, hand: HandPose, moving: bool = True) -> None:
+        """Take one sighting of the hand; call once per webcam frame while it is seen. While engaged and
+        `moving` (the clutch still closed), it moves the target and the turn."""
+        last = self._hand_pos
+        self._hand_pos = np.append(self._across(hand.position[:2], hand.at), self._depth(hand.position[2:], hand.at))
+        self._hand_rot = self._turning(hand.rotation, hand.at)
+        self._pinch = float(self._pinching([hand.pinch], hand.at)[0])
+        if not (self.engaged and moving):
+            return
+        m = self.mapping
+        if last is not None:
+            gain = m.scale * m.gain(math.hypot(self._across.speed, self._depth.speed))
+            self._target = self._target + gain * (m.to_base @ (self._hand_pos - last))
+            if (gap := np.linalg.norm(off := self._target - self._held)) > m.hold_m:
+                self._held = self._held + off * (1.0 - m.hold_m / gap)
+        turn = Rotation.from_matrix(self._hand_rot @ self._anchor_hand_rot.T).as_rotvec()
+        if (angle := np.linalg.norm(turn)) > (cap := m.max_hand_turn_rad):
+            beyond = turn * (1.0 - cap / angle)  # same axis, so the anchor can take it on the left
+            self._anchor_hand_rot = Rotation.from_rotvec(beyond).as_matrix() @ self._anchor_hand_rot
+            turn = turn - beyond
+        angle = float(np.linalg.norm(turn))
+        wanted = Rotation.from_rotvec(turn * (max(0.0, angle - m.turn_deadband_rad) / max(angle, 1e-9))).as_matrix()
+        off = Rotation.from_matrix(wanted @ self._kept.T).as_rotvec()
+        if (gap := np.linalg.norm(off)) > m.hold_rad:
+            self._kept = Rotation.from_rotvec(off * (1.0 - m.hold_rad / gap)).as_matrix() @ self._kept
+
+    def forget(self) -> None:
+        """The hand is gone, or a sighting was a glitch: the next one starts the filters afresh."""
+        self._across.clear(), self._depth.clear(), self._turning.clear(), self._pinching.clear()
+        self._hand_pos = self._hand_rot = None
+
+    def engage(self, tcp: np.ndarray, grip_mm: float) -> None:
+        """Anchor the hand, as filtered so far, to the tool pose `tcp` (4, 4) and the gripper's opening."""
+        assert self._hand_pos is not None, "observe the hand before engaging"
         self.engaged = True
-        self._anchor_hand_pos, self._anchor_hand_rot = hand.position.copy(), hand.rotation.copy()
+        self._anchor_hand_rot, self._kept = self._hand_rot.copy(), np.eye(3)
         self._anchor_tcp, self._goal, self._turn = tcp.copy(), tcp.copy(), np.eye(3)
-        self._hand_pos = self._filters[0].reset(hand.position, hand.at)
-        self._hand_turn = self._filters[1].reset(np.zeros(3), hand.at)
-        self._pinch = float(self._filters[2].reset([hand.pinch], hand.at)[0])
+        self._target, self._held = tcp[:3, 3].copy(), tcp[:3, 3].copy()
         self.grip_mm = grip_mm
         self._grip_side = math.copysign(1.0, self.mapping.grip_mm(self._pinch) - grip_mm)
         self._grip_taken = abs(self.mapping.grip_mm(self._pinch) - grip_mm) <= self.mapping.takeover_mm
@@ -261,22 +412,14 @@ class ArmFollower:
     def release(self) -> None:
         self.engaged = False
 
-    def track(self, hand: HandPose) -> None:
-        """Take one new sighting of the hand (filtered); call once per webcam frame while engaged."""
-        turn = Rotation.from_matrix(hand.rotation @ self._anchor_hand_rot.T).as_rotvec()
-        self._hand_pos = self._filters[0](hand.position, hand.at)
-        self._hand_turn = self._filters[1](turn, hand.at)
-        self._pinch = float(self._filters[2]([hand.pinch], hand.at)[0])
-
     def goal(self, fps: float) -> np.ndarray:
         """This tick's target tool pose (4, 4) in the base frame; `grip_mm` is the gripper's."""
         m = self.mapping
-        position = self._anchor_tcp[:3, 3] + m.scale * m.to_base @ (self._hand_pos - self._anchor_hand_pos)
-        turn = m.to_base @ Rotation.from_rotvec(self._hand_turn).as_matrix() @ m.to_base.T
+        turn = m.to_base @ self._kept @ m.to_base.T
         self._turn = {"off": np.eye(3), "yaw": _rot_z(_twist_about_z(turn))}.get(m.rotate, turn)
         rotation = self._turn @ self._anchor_tcp[:3, :3]
 
-        step = position - self._goal[:3, 3]
+        step = self._held - self._goal[:3, 3]
         if (n := np.linalg.norm(step)) > (limit := m.max_speed_m_s / fps):
             step *= limit / n
         swing = Rotation.from_matrix(rotation @ self._goal[:3, :3].T).as_rotvec()
@@ -300,20 +443,27 @@ class ArmFollower:
         return self.engaged and not self._grip_taken
 
     def settle(self, reachable: np.ndarray) -> None:
-        """Where the IK says the arm can go this tick (4, 4); slide the anchor if the target is past it."""
+        """Where the IK says the arm can go this tick (4, 4). A place past it moves the target there; a
+        turn past it holds the target there, and with `rotate` other than "full" turns the anchor too."""
         m = self.mapping
         miss = reachable[:3, 3] - self._goal[:3, 3]
         if np.linalg.norm(miss) > m.slip_m:
             self._anchor_tcp[:3, 3] += miss
+            self._target, self._held = self._target + miss, self._held + miss
             self._goal[:3, 3] += miss
         off = Rotation.from_matrix(reachable[:3, :3] @ self._goal[:3, :3].T).magnitude()
         if off > m.slip_rad:
-            self._anchor_tcp[:3, :3] = self._turn.T @ reachable[:3, :3]
-            self._goal[:3, :3] = reachable[:3, :3]
+            if m.rotate != "full":  # some of the orientation is the anchor's alone: keep the one the arm has
+                self._anchor_tcp[:3, :3] = self._turn.T @ reachable[:3, :3]
+            self._goal[:3, :3] = reachable[:3, :3]  # full: the hand turns it back; only the target waits
 
     def moved(self) -> np.ndarray:
         """The target's offset from the anchor, base frame, m."""
         return self._goal[:3, 3] - self._anchor_tcp[:3, 3] if self.engaged else np.zeros(3)
+
+    def turned(self) -> float:
+        """How far the target has turned from the anchor, rad."""
+        return turn_between(self._anchor_tcp[:3, :3], self._goal[:3, :3]) if self.engaged else 0.0
 
 
 class ArmsIK:
@@ -322,14 +472,24 @@ class ArmsIK:
     `table_z_m` is a floor under each arm, in its base frame (0 is the base's underside, so the table
     it stands on): targets are clipped above it and the solve keeps the arm's centreline off it. There
     is no arm-to-arm guard: the bases' spacing is not known here.
+
+    Place comes before turn. Where a pose cannot be reached, the solve trades place against turn by
+    their weights. dream_ik's own, 50 to 10 (Dream Labs' teleop), let a hand tilted past what the arm
+    can do from its rest pose drag the tool 3 to 11 cm; at `TURN_WEIGHT` the turn gives way instead and
+    the tool stays within a few millimetres, at the cost of ending reachable turns a degree or two short.
     """
 
+    TURN_WEIGHT = 4.0
+
     def __init__(self, fps: float, table_z_m: float, max_joint_rad_s: float) -> None:
-        from dream_ik.solver import ChunkIK  # lazy: JAX
+        import jax.numpy as jnp  # lazy: JAX
+        from dream_ik.solver import ChunkIK
         from dream_ik.specs import Region
 
         floor = (Region(lo=(None, None, table_z_m)),)
         self._ik = ChunkIK("metal", "tcp", hz=fps, obstacles={side: floor for side in SIDES})
+        for group in self._ik._groups:  # dream_ik keeps its weights internal (pinned in uv.lock)
+            group.w = {**group.w, "ori": jnp.full_like(group.w["ori"], self.TURN_WEIGHT)}
         self._rows = [self._ik.sides.index(side) for side in SIDES]  # the IK orders sides (right, left)
         self.max_joint_rad_s = max_joint_rad_s
         self.rest = self._ik.side_rest[self._rows[0]].copy()

@@ -167,7 +167,8 @@ a joint. Every command is also clamped to the soft limits.
 | `DREAM_MAX_JOINT_RAD_S` | `0.5` | cap on commanded joint speed; also the ramp in after a handoff |
 
 `uv run dream-1-tasks` reads the same settings. Its tasks come from `--task`
-(repeated), then `PORTAL_DATA_TASKS`, then `PORTAL_DATA_TASK`.
+(repeated), then `PORTAL_DATA_TASKS`, then `PORTAL_DATA_TASK`; with none, it
+starts with no task and does not move until one is set.
 
 ### Voice agent
 

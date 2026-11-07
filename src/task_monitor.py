@@ -290,6 +290,9 @@ class Monitor:
             self.retry_at = now + RETRY_S
             print(f"[{WHO}] cannot read Dream-1's task ({exc}); trying again")
             return
+        if not status.get("task"):  # handed control with no task, Dream-1 does not move: nothing to watch
+            self.retry_at = now + RETRY_S
+            return
         self.runs += 1
         self.run = Run(self.runs, driver, status["task"], now, self.limits)
         print(f"[{WHO}] run {self.runs}: Dream-1 drives on {self.run.task!r}")

@@ -113,6 +113,8 @@ uv run dream-1-tasks --dry-run \
 
 The first task is the starting one. Without `--task`, the list comes from
 `PORTAL_DATA_TASKS`, the same setting teleop reads, then `PORTAL_DATA_TASK`.
+With none of these, Dream-1 starts with no task and does not move, even when
+handed control, until you give it one.
 In this terminal, `1`–`9` switch task (pausing Dream-1 if it drives), `c` takes
 or releases control, and `p` parks or powers up the arms. When the targets look
 right, stop it with Ctrl-C and start it again without `--dry-run`.

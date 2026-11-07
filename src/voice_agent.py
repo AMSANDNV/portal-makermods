@@ -123,8 +123,9 @@ def describe(status: dict) -> str:
         state = "Dream-1 is paused and the arms are holding still"
     teleop = "connected" if status.get("teleoperator_connected") else "not connected"
     hands = "connected" if status.get("hand_teleop_connected") else "not connected"
-    presets = "; ".join(f"{n}. {task}" for n, task in enumerate(status.get("presets", []), start=1))
-    return (f"Task: {status.get('task')!r}. {state}. The leader-arm teleoperator is {teleop}; the hand teleop is "
+    presets = "; ".join(f"{n}. {task}" for n, task in enumerate(status.get("presets", []), start=1)) or "none"
+    task = repr(status["task"]) if status.get("task") else "none yet, so Dream-1 cannot start until the user gives one"
+    return (f"Task: {task}. {state}. The leader-arm teleoperator is {teleop}; the hand teleop is "
             f"{hands}. Preset tasks: {presets}.")
 
 

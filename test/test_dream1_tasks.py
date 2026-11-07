@@ -8,7 +8,6 @@ from unittest import mock
 
 from policies.dream_1_tasks.run import MAX_TASK_CHARS, TaskControl, session_tasks
 from utils.common import DREAM_TASKS_IDENTITY, HAND_TELEOP_IDENTITY, TELEOPERATOR_IDENTITY
-from utils.session import DEFAULT_TASK
 
 ME = DREAM_TASKS_IDENTITY
 BLUE, RED = "put the blue cube in the box", "put the red cube in the box"
@@ -139,6 +138,18 @@ class TaskControlTests(unittest.IsolatedAsyncioTestCase):
         await tasks.set_task(BLUE, "voice-agent")
         self.assertFalse(tasks.changed)
 
+    async def test_no_task_never_takes_control(self):
+        self.op = FakeOperator(active=None)
+        tasks = TaskControl(self.op, [])
+        self.assertEqual((tasks.status()["task"], tasks.status()["presets"]), (None, []))
+        with self.assertRaises(ValueError):
+            await tasks.resume("voice-agent")
+        self.assertIsNone(self.op.active)
+        status = await tasks.set_task(RED, "voice-agent")  # a task sets it, and still does not start motion
+        self.assertEqual((status["task"], self.op.active), (RED, None))
+        await tasks.resume("voice-agent")
+        self.assertEqual(self.op.active, ME)
+
     def test_status_lists_the_presets(self):
         status = self.control().status()
         self.assertEqual(status, {"task": BLUE, "presets": [BLUE, RED], "driving": False, "active_operator": None,
@@ -147,14 +158,14 @@ class TaskControlTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SessionTaskTests(unittest.TestCase):
-    def test_flags_then_env_then_default(self):
+    def test_flags_then_env_then_none(self):
         with mock.patch.dict(os.environ, {"PORTAL_DATA_TASKS": f"{BLUE}; {RED}", "PORTAL_DATA_TASK": "other"}):
             self.assertEqual(session_tasks(["fold the towel"]), ["fold the towel"])
             self.assertEqual(session_tasks(None), [BLUE, RED])
         with mock.patch.dict(os.environ, {"PORTAL_DATA_TASKS": "", "PORTAL_DATA_TASK": "other"}):
             self.assertEqual(session_tasks(None), ["other"])
         with mock.patch.dict(os.environ, {"PORTAL_DATA_TASKS": "", "PORTAL_DATA_TASK": ""}):
-            self.assertEqual(session_tasks(None), [DEFAULT_TASK])
+            self.assertEqual(session_tasks(None), [])
 
     def test_at_most_nine(self):
         self.assertEqual(len(session_tasks([str(n) for n in range(12)])), 9)

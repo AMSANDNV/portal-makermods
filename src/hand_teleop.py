@@ -7,8 +7,9 @@ MediaPipe finds up to two hands in the raw webcam image; the operator's right ha
 arm. A hand holds its arm while middle, ring and pinky are curled all the way into the palm, leaving
 thumb and index as a gripper, and the gap between their tips sets the gripper. Lifting any of the
 three out of the palm lets go: nothing more is sent for that arm, and the robot holds it. Every grip
-anchors anew, so the arm follows the hand's motion since the grip, never where the hand is: let go,
-move back, grip again, as with a mouse.
+anchors anew, so the arm follows the hand's motion and turn since the grip, never where the hand is
+or how it is held: let go, move back, grip again, as with a mouse. As with a mouse, slow moves count
+for less (`HAND_FINE_SCALE`), so careful ones are fine and a still hand holds the arm still.
 dream_ik turns each target tool pose into joints. See tutorial/11-hand-teleop.md.
 
 Keys: `c` takes or releases control, `p` parks or powers up the arms, `x` quits. Saying "hand teleop" to the voice
@@ -32,8 +33,8 @@ import numpy as np
 
 from utils.common import (CONFIG_PATH, HardwareThread, claim_or_release, env_camera_id, env_float, env_int, env_str,
                           hand_teleop_identity, load_env, mint_token, pace, request_park, required_env)
-from utils.hands import (BONES, INDEX_TIP, THUMB_TIP, ArmFollower, ArmsIK, Clutch, Hand, HandPose, Mapping,
-                         assign_sides, camera_to_base, hand_pose)
+from utils.hands import (BONES, INDEX_TIP, THUMB_TIP, ArmFollower, ArmsIK, Clutch, Hand, HandPose, HandSize, Mapping,
+                         assign_sides, camera_to_base, hand_pose, turn_between)
 from utils.hotkeys import Hotkeys, input_backend_warning
 from utils.metal import SIDES, arm_fields, clamp_to_limits
 from utils.rerun_view import HAND_TELEOP_VIEWER_PORT, Preview
@@ -44,6 +45,7 @@ MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/hand_landmarker/ha
 STALE_S = 0.25  # hands not seen for this long are let go
 OBS_STALE_S = 0.5  # nothing is sent on a robot view older than this
 MAX_JUMP_M = 0.08  # a palm moving this far between two frames is a tracking glitch (or a hand swap): let go
+MAX_FLIP_RAD = math.radians(45)  # a palm turning this far between two frames is one too, when the gripper turns
 
 
 def model_path() -> str:
@@ -162,6 +164,9 @@ class Arm:
     hand: Optional[HandPose] = None
     image: Optional[np.ndarray] = None  # (21, 2) pixels, for the overlay
     last_position: Optional[np.ndarray] = None
+    last_rotation: Optional[np.ndarray] = None
+    size: HandSize = field(default_factory=HandSize)  # the palm's size, steadier than any one frame's
+    grip_size: Optional[float] = None  # held for the length of a grip, so depth cannot drift with it
     events: list[str] = field(default_factory=list)
 
 
@@ -191,16 +196,24 @@ class Pilot:
             h, w = sighting.image.shape[:2]
         for side, arm in self.arms.items():
             hand = hands.get(side)
-            pose = hand_pose(hand, sighting.at, self.focal_px, (w / 2, h / 2)) if hand is not None else None
+            if hand is not None:
+                arm.size.add(hand.world)
+            size = arm.grip_size if arm.follower.engaged else arm.size.value
+            pose = hand_pose(hand, sighting.at, self.focal_px, (w / 2, h / 2), size) if hand is not None else None
             jumped = (pose is not None and arm.last_position is not None
                       and np.linalg.norm(pose.position - arm.last_position) > MAX_JUMP_M)
+            flipped = (pose is not None and arm.last_rotation is not None and arm.follower.mapping.rotate != "off"
+                       and turn_between(arm.last_rotation, pose.rotation) > MAX_FLIP_RAD)
             arm.last_position = None if pose is None else pose.position
+            arm.last_rotation = None if pose is None else pose.rotation
             arm.hand, arm.image = pose, None if hand is None else hand.image
-            if jumped and arm.clutch.closed:
-                arm.events.append("the hand jumped (tracking glitch?): let go")
-            arm.clutch.update(None if pose is None or jumped else pose.curl)
-            if arm.follower.engaged and arm.clutch.closed:
-                arm.follower.track(pose)
+            if (jumped or flipped) and arm.clutch.closed:
+                arm.events.append(f"the hand {'jumped' if jumped else 'flipped'} (tracking glitch?): let go")
+            arm.clutch.update(None if pose is None or jumped or flipped else pose.curl)
+            if pose is None or jumped or flipped:
+                arm.follower.forget()
+            else:
+                arm.follower.observe(pose, moving=arm.clutch.closed)
 
     def take_over(self, state: dict[str, float]) -> None:
         self.q = {side: np.array([state[name] for name in arm_fields(side)[:6]]) for side in SIDES}
@@ -231,7 +244,8 @@ class Pilot:
             self.take_over(state)
         for side, arm in self.arms.items():
             if side in gripping and not arm.follower.engaged:
-                arm.follower.engage(arm.hand, self.ik.fk(self.q[side], side), self.grip[side])
+                arm.grip_size = arm.size.value
+                arm.follower.engage(self.ik.fk(self.q[side], side), self.grip[side])
                 arm.events.append("following" + (" (gripper waits for the pinch to reach it)"
                                                  if arm.follower.grip_waiting else ""))
             elif side not in gripping and arm.follower.engaged:
@@ -300,7 +314,10 @@ def draw(sighting: Sighting, pilot: Pilot, status: str) -> np.ndarray:
         x, y = w - 1 - arm.image[:, 0].mean(), arm.image[:, 1].min() - 8  # centred just above the hand
         if arm.follower.engaged:
             d = arm.follower.moved() * 1000
-            label = f"{side.upper()} {d[0]:+.0f} fwd {-d[1]:+.0f} right {d[2]:+.0f} up mm, grip {arm.follower.grip_mm:.0f}"
+            label = f"{side.upper()} {d[0]:+.0f} fwd {-d[1]:+.0f} right {d[2]:+.0f} up mm"
+            if arm.follower.mapping.rotate != "off":
+                label += f", turn {math.degrees(arm.follower.turned()):.0f} deg"
+            label += f", grip {arm.follower.grip_mm:.0f}"
             label += " (pinch to take the gripper)" if arm.follower.grip_waiting else ""
         else:
             label = f"{side.upper()} curl {' '.join(f'{c:.1f}' for c in arm.hand.curl)}" if arm.hand else side.upper()
@@ -312,7 +329,9 @@ def draw(sighting: Sighting, pilot: Pilot, status: str) -> np.ndarray:
 def build_pilot(fps: float, ik: ArmsIK, rotate: str, frame_width: int) -> Pilot:
     hfov = math.radians(env_float("HAND_CAMERA_HFOV_DEG", 70.0))
     mappings = {side: Mapping(to_base=camera_to_base(env_float(f"HAND_{side.upper()}_YAW_DEG", 0.0)),
-                              scale=env_float("HAND_SCALE", 1.0), rotate=rotate,
+                              scale=env_float("HAND_SCALE", 1.0), fine_scale=env_float("HAND_FINE_SCALE", 0.4),
+                              rotate=rotate,
+                              turn_deadband_rad=math.radians(env_float("HAND_TURN_DEADBAND_DEG", 5.0)),
                               max_speed_m_s=env_float("HAND_MAX_SPEED_M_S", 0.5))
                 for side in SIDES}
     return Pilot(ik, mappings, fps, focal_px=frame_width / 2 / math.tan(hfov / 2),
@@ -324,8 +343,9 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--offline", action="store_true",
                         help="no robot: the arms start at the IK's rest pose and nothing is sent")
-    parser.add_argument("--rotate", choices=("off", "yaw", "full"), default=env_str("HAND_ROTATE", "off"),
-                        help="what the hand's turning does to the gripper (default: off, it keeps its orientation)")
+    parser.add_argument("--rotate", choices=("full", "yaw", "off"), default=env_str("HAND_ROTATE", "full"),
+                        help="what the hand's turning does to the gripper (default: full, it turns as the hand "
+                             "does; yaw: about vertical only; off: it keeps its orientation)")
     args = parser.parse_args()
 
     if args.offline:
@@ -378,7 +398,7 @@ async def main() -> None:
         if (why := input_backend_warning()) is not None:
             print(f"[hands] global hotkeys will not fire ({why}); press them in this terminal")
         print("[hands] curl middle, ring and pinky into the palm to grip an arm; thumb to index sets its gripper; "
-              "lift one out to let go")
+              "lift one out to let go" + ("" if args.rotate == "off" else "; turning the hand turns the gripper"))
         print("[hands] " + ("offline: nothing is sent; x quits" if args.offline else
                             "c takes or releases control, p parks, x quits"))
         shown_seq = 0
