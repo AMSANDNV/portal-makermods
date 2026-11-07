@@ -32,6 +32,7 @@ voice-agent = "voice_agent:run"
 hand-teleop = "hand_teleop:run"
 task-monitor = "task_monitor:run"
 maker-arm = "maker_arm.cli.main:main"
+scene-planner = "scene_planner:run"
 
 [build-system]
 requires = ["setuptools>=69"]
@@ -47,7 +48,7 @@ override-dependencies = [
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-py-modules = ["robot", "teleoperator", "recorder", "voice_agent", "hand_teleop", "task_monitor"]
+py-modules = ["robot", "teleoperator", "recorder", "voice_agent", "hand_teleop", "task_monitor", "scene_planner"]
 packages = [
     "utils",
     "policies",
