@@ -12,7 +12,7 @@ from maker_arm.arm import Arm as SdkArm
 from maker_arm.config import ArmConfig as SdkArmConfig
 from maker_arm.profiles import DEFAULT_ARM_CONFIG
 from maker_arm.transport.base import create_backend
-from utils.common import env_float
+from utils.common import env_float, env_str
 
 log = logging.getLogger(__name__)
 
@@ -57,10 +57,18 @@ class MakerSdkFollowerArm:
         )
 
         backend_name, backend_kwargs = _resolve_backend(can_channel)
-        if backend_name == "slcan":
-            cfg.control_rate_hz = env_float("MAKER_CONTROL_RATE_HZ", 25.0)
+        cfg.control_rate_hz = env_float("MAKER_CONTROL_RATE_HZ", 25.0)
 
-        self.sdk_arm = SdkArm(cfg, create_backend(backend_name, **backend_kwargs))
+        backend = create_backend(backend_name, **backend_kwargs)
+        # Pace commands: wait for each motor's reply before sending the next, so the adapter's RX
+        # FIFO never overflows. Without it the candleLight/gs_usb (SocketCAN) arm floods the bus and
+        # motors miss fault-status replies ("no fault-status reply ...": a brakeless hold on that
+        # joint). This is the same fix the single-arm kit uses (rig/makerarm-kit/armkit.py).
+        if env_str("MAKER_FEEDBACK_PACED", "1").lower() not in ("0", "false", "no"):
+            backend.feedback_paced_control = True
+            backend.feedback_wait_timeout = env_float("MAKER_FEEDBACK_WAIT_S", 0.015)
+
+        self.sdk_arm = SdkArm(cfg, backend)
         self.sdk_arm.connect()
         if energize:
             self.sdk_arm.enable()
