@@ -12,6 +12,7 @@ import logging
 import math
 import platform
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import numpy as np
@@ -19,6 +20,26 @@ import numpy as np
 from utils.common import env_camera_id, env_float, env_int, env_str, required_env
 
 logger = logging.getLogger(__name__)
+
+# One worker per arm so the two adapters do their blocking I/O at the same time: the right arm's
+# command pacing (candleLight) then never stalls the left arm's feedback (slcan) and vice versa.
+_ARM_IO: ThreadPoolExecutor | None = None
+
+
+def _arm_io(n: int) -> ThreadPoolExecutor:
+    global _ARM_IO
+    if _ARM_IO is None:
+        _ARM_IO = ThreadPoolExecutor(max_workers=max(2, n), thread_name_prefix="arm-io")
+    return _ARM_IO
+
+
+def _each_arm(arms: dict, call) -> dict:
+    """Run `call(side, arm)` for every arm at once; return {side: result}. Serial for a single arm."""
+    if len(arms) <= 1:
+        return {side: call(side, arm) for side, arm in arms.items()}
+    pool = _arm_io(len(arms))
+    futures = {side: pool.submit(call, side, arm) for side, arm in arms.items()}
+    return {side: fut.result() for side, fut in futures.items()}
 
 SIDES = ("left", "right")
 GRIPPER_MAX_MM = 100.0  # the driver's gripper runs 0..1; carried as mm
@@ -222,10 +243,15 @@ class StepLimiter:
 
 
 def _read_pair(arms: dict[str, Arm]) -> dict[str, float]:
-    """Both arms as one dict, or {} if either is unreadable: never half a row."""
+    """Both arms as one dict, or {} if either is unreadable: never half a row.
+
+    The two arms are read concurrently (one thread each) so a slow or command-paced adapter never
+    stalls the other arm's feedback.
+    """
+    readings = _each_arm(arms, lambda _side, arm: arm.read())
     values = {}
-    for side, arm in arms.items():
-        if (reading := arm.read()) is None:
+    for side, reading in readings.items():
+        if reading is None:
             return {}
         values.update(zip(arm_fields(side), reading))
     return values
@@ -274,10 +300,13 @@ class Followers:
         if self.parked:
             return
         target = clamp_to_limits(self.limiter.step(action))
+        ready = {}
         for side, arm in self.arms.items():
             fields = arm_fields(side)
             if all(name in target and name in self.limiter.present for name in fields):  # never before a read
-                arm.command([target[name] for name in fields])
+                ready[side] = (arm, [target[name] for name in fields])
+        # Command both arms at once so one arm's paced write never delays the other.
+        _each_arm(ready, lambda side, pair: pair[0].command(pair[1]))
 
     def go_home(self, fps: int) -> None:
         """Walk both arms back to where they were opened and hold them there, powered. Grippers stay as they are.
