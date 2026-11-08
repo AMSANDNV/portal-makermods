@@ -36,3 +36,4 @@ __pycache__/
 # Astra director run artifacts
 plan.json
 plan_annotated.jpg
+groceries.json

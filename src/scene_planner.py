@@ -42,6 +42,7 @@ MAX_TASKS = 9
 MAX_TASK_CHARS = 200
 PLAN_PATH = Path(__file__).resolve().parents[1] / "plan.json"
 ANNOTATED_PATH = Path(__file__).resolve().parents[1] / "plan_annotated.jpg"
+GROCERIES_PATH = Path(__file__).resolve().parents[1] / "groceries.json"
 
 DEFAULT_BASE_URL = "https://inference-api.nvidia.com/v1"
 DEFAULT_MODEL = "azure/openai/gpt-6-astra"
@@ -49,9 +50,10 @@ DEFAULT_GOAL = "make a cheese quesadilla on the griddle"
 
 SYSTEM_PROMPT = """\
 You are the visual strategic planner for a bimanual MakerMods robot driven by the Dream-1 policy.
-You see one photo of the workspace (an overhead camera) and a goal. Produce the ordered list of
-short manipulation steps the robot must perform to reach the goal, grounded ONLY in what the photo
-shows (ingredients, tools, their positions).
+You see one photo of the workspace (an overhead camera) and a goal. First identify the ingredients
+and tools the GOAL needs, and split them into which are VISIBLE in the photo ("present") and which
+are NOT ("missing"). Then produce the ordered list of short manipulation steps the robot must
+perform, grounded ONLY in what the photo shows (ingredients, tools, their positions).
 
 For each step also give the contact point: the pixel [x, y] in THIS image where the gripper should
 make contact (e.g. the spot on the tortilla to grasp or press). Use image pixel coordinates with
@@ -62,10 +64,15 @@ Rules for each step:
   e.g. "pick up the tortilla and lay it flat on the griddle".
 - Name the specific object you see ("the yellow cheese", "the red bowl"), never vague references.
 - Order them so the task actually succeeds (e.g. tortilla before cheese before folding before plating).
+- If an ingredient the goal needs is NOT visible, do not refuse: plan the manipulation steps you CAN do
+  now with the objects that ARE visible, progressing toward the goal (e.g. only a tortilla is present ->
+  lay it flat, fold it, press it). Only return an empty steps list if there is truly no manipulable object.
 - At most nine steps. Keep each instruction under 200 characters.
 
 Respond with ONLY a JSON object of this exact shape and nothing else:
 {"reasoning": "<one short sentence on what you see and the strategy>",
+ "present": ["<ingredient/tool the goal needs that IS visible>", ...],
+ "missing": ["<ingredient/tool the goal needs that is NOT visible>", ...],
  "steps": [{"task": "<imperative instruction>", "contact_xy": [x, y]}, ...]}"""
 
 VERIFY_PROMPT = """\
@@ -142,8 +149,14 @@ def _contact_point(raw) -> list[int] | None:
     return None
 
 
-def plan(rgb: np.ndarray, goal: str) -> tuple[str, list[dict]]:
-    """Ask Astra for the ordered steps and their contact points from the scene frame."""
+def _str_list(raw) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [" ".join(str(x).split()) for x in raw if str(x).strip()]
+
+
+def plan(rgb: np.ndarray, goal: str) -> tuple[str, list[dict], list[str], list[str]]:
+    """Ask Astra for the ordered steps, their contact points, and the present/missing ingredients."""
     print(f"[astra] planning {goal!r} ...")
     obj = _extract_json(astra(SYSTEM_PROMPT, f"Goal: {goal}. Plan the ordered steps from this scene.", rgb))
     raw_steps = obj.get("steps")
@@ -158,7 +171,28 @@ def plan(rgb: np.ndarray, goal: str) -> tuple[str, list[dict]]:
             steps.append({"task": task, "contact_xy": _contact_point(item.get("contact_xy"))})
     if not steps:
         raise SystemExit("Astra returned an empty plan")
-    return str(obj.get("reasoning", "")).strip(), steps[:MAX_TASKS]
+    return (str(obj.get("reasoning", "")).strip(), steps[:MAX_TASKS],
+            _str_list(obj.get("present")), _str_list(obj.get("missing")))
+
+
+def load_groceries() -> list[str]:
+    try:
+        return json.loads(GROCERIES_PATH.read_text())
+    except (OSError, ValueError):
+        return []
+
+
+def add_groceries(items: list[str]) -> list[str]:
+    """Append items to the persisted groceries list, skipping ones already on it (case-insensitive)."""
+    have = load_groceries()
+    lower = {g.lower() for g in have}
+    for item in items:
+        item = str(item).strip()
+        if item and item.lower() not in lower:
+            have.append(item)
+            lower.add(item.lower())
+    GROCERIES_PATH.write_text(json.dumps(have, indent=2))
+    return have
 
 
 def verify(rgb: np.ndarray, task: str, goal: str) -> tuple[bool, str]:
@@ -208,9 +242,15 @@ def overlay_markers(rgb: np.ndarray, points: list, labels: bool = True) -> np.nd
     return out
 
 
-def emit(reasoning: str, steps: list[dict], frame: np.ndarray | None) -> None:
-    PLAN_PATH.write_text(json.dumps({"goal_reasoning": reasoning, "steps": steps}, indent=2))
+def emit(reasoning: str, steps: list[dict], frame: np.ndarray | None,
+         present: list[str] | None = None, missing: list[str] | None = None) -> None:
+    present, missing = present or [], missing or []
+    PLAN_PATH.write_text(json.dumps(
+        {"goal_reasoning": reasoning, "present": present, "missing": missing, "steps": steps}, indent=2))
     print(f"\n[astra] strategy: {reasoning}\n")
+    if present or missing:
+        print(f"[astra] present: {', '.join(present) or 'none'}")
+        print(f"[astra] missing: {', '.join(missing) or 'none'}\n")
     for i, step in enumerate(steps, 1):
         at = f"  @ {step['contact_xy']}" if step.get("contact_xy") else ""
         print(f"  {i}. {step['task']}{at}")
@@ -268,8 +308,11 @@ class Director:
                                          destination=DREAM_TASKS_IDENTITY, response_timeout_ms=5000)
 
     async def cook(self, goal: str, *, auto: bool, verify_every_s: float, step_timeout_s: float) -> None:
-        reasoning, steps = await asyncio.to_thread(plan, self.frame, goal)
-        emit(reasoning, steps, self.frame)
+        reasoning, steps, present, missing = await asyncio.to_thread(plan, self.frame, goal)
+        emit(reasoning, steps, self.frame, present, missing)
+        if missing and not self._gate_missing(missing, auto):
+            print("[astra] stopping before Dream-1 runs; add the ingredients and plan again.")
+            return
         print("[astra] directing Dream-1. A hand on the park key (p). Ctrl-C stops.\n")
         for i, step in enumerate(steps, 1):
             task, point = step["task"], step.get("contact_xy")
@@ -287,6 +330,19 @@ class Director:
                     await self._retry(step, goal, verify_every_s, step_timeout_s)
         await self._rpc(DREAM_SET_MARKERS_RPC, {"points": []})
         print("\n[astra] plan complete.")
+
+    def _gate_missing(self, missing: list[str], auto: bool) -> bool:
+        """Report the missing ingredients and offer the groceries list. Returns True to proceed with what's here."""
+        joined = ", ".join(missing)
+        print(f"\n[astra] Missing {joined}! Should I add it to the groceries list?")
+        if auto:  # unattended: log it to groceries and carry on with the visible objects
+            print(f"[astra] --auto: added to groceries -> {add_groceries(missing)}")
+            return True
+        choice = input("[astra] [a] add to groceries, [p] proceed with what's here, [q] stop > ").strip().lower()
+        if choice == "a":
+            print(f"[astra] groceries -> {add_groceries(missing)}")
+            return input("[astra] proceed with what's here now? [y/N] > ").strip().lower() == "y"
+        return choice == "p"
 
     async def _watch_step(self, task: str, goal: str, every_s: float, timeout_s: float) -> bool:
         deadline = time.monotonic() + timeout_s
@@ -326,8 +382,8 @@ async def amain(args: argparse.Namespace) -> None:
                 frame = director.frame
             finally:
                 await director.close()
-        reasoning, steps = await asyncio.to_thread(plan, frame, args.goal)
-        emit(reasoning, steps, frame)
+        reasoning, steps, present, missing = await asyncio.to_thread(plan, frame, args.goal)
+        emit(reasoning, steps, frame, present, missing)
         return
 
     director = Director()

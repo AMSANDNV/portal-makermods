@@ -27,17 +27,34 @@ class PlanParsingTests(unittest.TestCase):
 
     def test_steps_with_contact_points(self):
         reply = self._reply({"reasoning": "a tortilla and cheese",
+                             "present": ["tortilla", "cheese"], "missing": [],
                              "steps": [{"task": "lay the tortilla flat", "contact_xy": [250, 200]},
                                        {"task": "add the cheese", "contact_xy": [420, 160]}]})
         orig = scene_planner.astra
         scene_planner.astra = lambda *a, **k: reply
         try:
-            reasoning, steps = scene_planner.plan(np.zeros((360, 640, 3), np.uint8), "make a quesadilla")
+            reasoning, steps, present, missing = scene_planner.plan(np.zeros((360, 640, 3), np.uint8),
+                                                                    "make a quesadilla")
         finally:
             scene_planner.astra = orig
         self.assertEqual(reasoning, "a tortilla and cheese")
         self.assertEqual(steps[0], {"task": "lay the tortilla flat", "contact_xy": [250, 200]})
         self.assertEqual(steps[1]["contact_xy"], [420, 160])
+        self.assertEqual(present, ["tortilla", "cheese"])
+        self.assertEqual(missing, [])
+
+    def test_present_and_missing_ingredients(self):
+        reply = self._reply({"reasoning": "only a tortilla", "present": ["tortilla"],
+                             "missing": ["cheese", "griddle"],
+                             "steps": [{"task": "fold the tortilla", "contact_xy": [1, 2]}]})
+        orig = scene_planner.astra
+        scene_planner.astra = lambda *a, **k: reply
+        try:
+            _, _, present, missing = scene_planner.plan(np.zeros((10, 10, 3), np.uint8), "make a quesadilla")
+        finally:
+            scene_planner.astra = orig
+        self.assertEqual(present, ["tortilla"])
+        self.assertEqual(missing, ["cheese", "griddle"])
 
     def test_missing_or_bad_contact_point_becomes_none(self):
         reply = self._reply({"reasoning": "", "steps": [{"task": "fold it"},
@@ -45,7 +62,7 @@ class PlanParsingTests(unittest.TestCase):
         orig = scene_planner.astra
         scene_planner.astra = lambda *a, **k: reply
         try:
-            _, steps = scene_planner.plan(np.zeros((10, 10, 3), np.uint8), "g")
+            _, steps, _, _ = scene_planner.plan(np.zeros((10, 10, 3), np.uint8), "g")
         finally:
             scene_planner.astra = orig
         self.assertIsNone(steps[0]["contact_xy"])
@@ -56,7 +73,7 @@ class PlanParsingTests(unittest.TestCase):
         orig = scene_planner.astra
         scene_planner.astra = lambda *a, **k: reply
         try:
-            _, steps = scene_planner.plan(np.zeros((10, 10, 3), np.uint8), "g")
+            _, steps, _, _ = scene_planner.plan(np.zeros((10, 10, 3), np.uint8), "g")
         finally:
             scene_planner.astra = orig
         self.assertEqual(len(steps), scene_planner.MAX_TASKS)
@@ -81,6 +98,53 @@ class VerifyTests(unittest.TestCase):
             scene_planner.astra = orig
         self.assertTrue(done)
         self.assertEqual(reason, "tortilla is flat")
+
+
+class GroceriesTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self._orig = scene_planner.GROCERIES_PATH
+        self._tmp = Path(tempfile.mkdtemp()) / "groceries.json"
+        scene_planner.GROCERIES_PATH = self._tmp
+
+    def tearDown(self):
+        scene_planner.GROCERIES_PATH = self._orig
+
+    def test_missing_file_is_empty_list(self):
+        self.assertEqual(scene_planner.load_groceries(), [])
+
+    def test_add_dedupes_case_insensitively(self):
+        self.assertEqual(scene_planner.add_groceries(["cheese", "Griddle"]), ["cheese", "Griddle"])
+        self.assertEqual(scene_planner.add_groceries(["CHEESE", "salsa"]), ["cheese", "Griddle", "salsa"])
+        self.assertEqual(scene_planner.load_groceries(), ["cheese", "Griddle", "salsa"])
+
+
+class GateMissingTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self._orig = scene_planner.GROCERIES_PATH
+        scene_planner.GROCERIES_PATH = Path(tempfile.mkdtemp()) / "groceries.json"
+
+    def tearDown(self):
+        scene_planner.GROCERIES_PATH = self._orig
+
+    def test_auto_logs_to_groceries_and_proceeds(self):
+        director = scene_planner.Director()
+        self.assertTrue(director._gate_missing(["cheese"], auto=True))
+        self.assertEqual(scene_planner.load_groceries(), ["cheese"])
+
+    def test_proceed_choice_returns_true(self):
+        import builtins
+        director = scene_planner.Director()
+        orig = builtins.input
+        builtins.input = lambda *a, **k: "p"
+        try:
+            self.assertTrue(director._gate_missing(["cheese"], auto=False))
+        finally:
+            builtins.input = orig
+        self.assertEqual(scene_planner.load_groceries(), [])  # 'p' does not add
 
 
 class OverlayTests(unittest.TestCase):
