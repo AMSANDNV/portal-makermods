@@ -57,14 +57,15 @@ class MakerSdkFollowerArm:
         )
 
         backend_name, backend_kwargs = _resolve_backend(can_channel)
-        cfg.control_rate_hz = env_float("MAKER_CONTROL_RATE_HZ", 25.0)
+        if backend_name == "slcan":
+            cfg.control_rate_hz = env_float("MAKER_CONTROL_RATE_HZ", 25.0)
 
         backend = create_backend(backend_name, **backend_kwargs)
-        # Pace commands: wait for each motor's reply before sending the next, so the adapter's RX
-        # FIFO never overflows. Without it the candleLight/gs_usb (SocketCAN) arm floods the bus and
-        # motors miss fault-status replies ("no fault-status reply ...": a brakeless hold on that
-        # joint). This is the same fix the single-arm kit uses (rig/makerarm-kit/armkit.py).
-        if env_str("MAKER_FEEDBACK_PACED", "1").lower() not in ("0", "false", "no"):
+        # Pace commands on the candleLight/gs_usb (SocketCAN) arm only: wait for each motor's reply
+        # before the next so its RX FIFO never overflows ("no fault-status reply ...": a brakeless
+        # hold). The SLCAN arm is already serial-paced and FAULTs if paced this way ("feedback
+        # timeout -- check bus/power"), so leave it alone. Same scope as the single-arm kit.
+        if backend_name == "socketcan" and env_str("MAKER_FEEDBACK_PACED", "1").lower() not in ("0", "false", "no"):
             backend.feedback_paced_control = True
             backend.feedback_wait_timeout = env_float("MAKER_FEEDBACK_WAIT_S", 0.015)
 
